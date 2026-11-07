@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window theme only (Compose draws the UI). Dark from the first frame: no white flash on launch. -->
+    <style name="Theme.Buddy" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0E0F12</item>
+        <!-- Launch splash: dark, with the app icon, instead of the default white. -->
+        <item name="android:windowSplashScreenBackground">#FF0E0F12</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+
+    <!-- Quick capture sheet floats over whatever app is open. -->
+    <style name="Theme.Buddy.Translucent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

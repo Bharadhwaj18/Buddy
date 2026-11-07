@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_description">Month spend, open tasks and one-tap capture</string>
+    <string name="health_widget_description">Steps, sleep, water and resting heart rate — add a glass of water in one tap</string>
+    <string name="money_widget_description">This month\'s spend, today\'s spend and your latest transactions</string>
+    <string name="fitness_widget_description">This week\'s km and sessions, today\'s plan session, start a run or gym session</string>
+    <string name="habits_widget_description">Tick off today\'s habits from the home screen</string>
+    <string name="today_widget_description">Today\'s tasks and reminders — tick them off from the home screen</string>
+</resources>

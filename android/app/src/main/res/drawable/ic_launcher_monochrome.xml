@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Themed-icon version of the checklist mark. Android tints this single colour, so the "done"
+  row uses an outlined circle with a tick (no dark-on-light detail that would disappear).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.9"
+        android:scaleY="0.9">
+        <path
+            android:pathData="M34,29.5 A6.5,6.5 0 1 1 33.99,29.5 Z"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5" />
+        <path
+            android:pathData="M30.5,36 L33,38.5 L37.5,33.5"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M51,32 H77 A4,4 0 0 1 77,40 H51 A4,4 0 0 1 51,32 Z" />
+        <path
+            android:pathData="M34,48 A6,6 0 1 1 33.99,48 Z"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M51,50 H71 A4,4 0 0 1 71,58 H51 A4,4 0 0 1 51,50 Z" />
+        <path
+            android:pathData="M34,66 A6,6 0 1 1 33.99,66 Z"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M51,68 H65 A4,4 0 0 1 65,76 H51 A4,4 0 0 1 51,68 Z" />
+    </group>
+</vector>

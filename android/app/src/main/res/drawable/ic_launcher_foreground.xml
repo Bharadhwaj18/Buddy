@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Buddy mark (concept B, "checklist"): one done item in lime, two to-dos in grey.
+  108dp adaptive-icon canvas, scaled about the centre to stay inside the 66dp safe circle.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.9"
+        android:scaleY="0.9">
+        <!-- Row 1: done -->
+        <path
+            android:fillColor="#C6F432"
+            android:pathData="M34,29 A7,7 0 1 1 33.99,29 Z" />
+        <path
+            android:pathData="M30.5,36 L33,38.5 L37.5,33.5"
+            android:strokeColor="#0E0F12"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:fillColor="#C6F432"
+            android:pathData="M51,32 H77 A4,4 0 0 1 77,40 H51 A4,4 0 0 1 51,32 Z" />
+        <!-- Row 2: to do -->
+        <path
+            android:pathData="M34,48 A6,6 0 1 1 33.99,48 Z"
+            android:strokeColor="#6B717C"
+            android:strokeWidth="2.5" />
+        <path
+            android:fillColor="#3A3F48"
+            android:pathData="M51,50 H71 A4,4 0 0 1 71,58 H51 A4,4 0 0 1 51,50 Z" />
+        <!-- Row 3: to do -->
+        <path
+            android:pathData="M34,66 A6,6 0 1 1 33.99,66 Z"
+            android:strokeColor="#6B717C"
+            android:strokeWidth="2.5" />
+        <path
+            android:fillColor="#3A3F48"
+            android:pathData="M51,68 H65 A4,4 0 0 1 65,76 H51 A4,4 0 0 1 51,68 Z" />
+    </group>
+</vector>

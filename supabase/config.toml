@@ -1,0 +1,6 @@
+# Minimal Supabase CLI config. The hosted project is linked by --project-ref on deploy.
+project_id = "shrey-app"
+
+[functions.buddy-ai]
+# Require a signed-in user's JWT; the function also re-checks it and queries under RLS.
+verify_jwt = true

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Downloaded update APKs, handed to the system installer. -->
+    <external-files-path name="updates" path="updates/" />
+    <!-- Camera captures for receipts / documents. -->
+    <cache-path name="captures" path="captures/" />
+    <!-- Documents downloaded from the vault for viewing. -->
+    <cache-path name="vault" path="vault/" />
+</paths>

@@ -1,0 +1,27 @@
+# Secrets / local config
+local.properties
+keystore.properties
+*.jks
+*.keystore
+.env
+.env.*
+supabase/.env
+supabase/.temp/
+
+# Gradle / Android / Kotlin
+.gradle/
+.kotlin/
+build/
+*.apk
+*.aab
+.idea/
+*.iml
+captures/
+.cxx/
+
+# Large downloaded assets (scripts/fetch-assets.ps1)
+android/app/src/main/assets/model-*/
+
+# OS
+.DS_Store
+Thumbs.db
