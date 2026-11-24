@@ -4,6 +4,7 @@ import com.shrey.buddy.data.db.AccountEntity
 import com.shrey.buddy.data.db.CaptureEntity
 import com.shrey.buddy.data.db.TransactionEntity
 import com.shrey.buddy.finance.Category
+import com.shrey.buddy.finance.MoneyBack
 import com.shrey.buddy.finance.prettyParty
 import com.shrey.buddy.ingest.sms.Bank
 import com.shrey.buddy.ingest.sms.SmsParse
@@ -34,6 +35,11 @@ data class TxnItem(
     val category: Category,
     /** Your sub-group under the category ("Coffee"), if any. */
     val sub: String? = null,
+    /** A payment: total money back linked to it (₹600 back on a ₹900 dinner). */
+    val backMinor: Long = 0,
+    /** Money back: what it was for, when linked to a payment. */
+    val backFor: String? = null,
+    val backForId: String? = null,
     val amountMinor: Long,
     val isCredit: Boolean,
     val isTransfer: Boolean,
@@ -96,8 +102,14 @@ fun buildMoneyData(
     decode: (CaptureEntity) -> SmsParse,
     selectedAccountId: String?,
     today: LocalDate = LocalDate.now(),
+    /** Money back → the payment it refunds (credit id → debit id). */
+    moneyBackLinks: Map<String, String> = emptyMap(),
 ): MoneyData {
     val accountById = accounts.associateBy { it.id }
+    val byId = txns.associateBy { it.id }
+    // Only links whose credit still counts as money back.
+    val links = moneyBackLinks.filter { (credit, debit) -> byId[credit]?.let(MoneyBack::isMoneyBack) == true && byId[debit] != null }
+    val backByDebit = links.entries.groupBy({ it.value }, { byId.getValue(it.key).amountMinor }).mapValues { it.value.sum() }
 
     val accountItems = accounts.filter { !it.archived }.map { a ->
         val (balance, balanceAt) = currentBalance(a, txns.filter { it.accountId == a.id })
@@ -124,6 +136,9 @@ fun buildMoneyData(
             channel = t.channel,
             category = Category.of(t.category),
             sub = Category.subOf(t.category),
+            backMinor = backByDebit[t.id] ?: 0,
+            backFor = links[t.id]?.let { byId[it] }?.let { it.payee ?: prettyParty(it.counterpartyRaw, it.channel) },
+            backForId = links[t.id],
             amountMinor = t.amountMinor,
             isCredit = t.direction == "credit",
             isTransfer = t.isTransfer,
@@ -141,7 +156,8 @@ fun buildMoneyData(
     fun monthOf(t: TransactionEntity) = YearMonth.from(Instant.ofEpochMilli(t.occurredAt).atZone(zone))
     val thisMonth = YearMonth.from(today)
     val lastMonth = thisMonth.minusMonths(1)
-    val debitsThisMonth = counted.filter { it.direction == "debit" && monthOf(it) == thisMonth }
+    // Spending = payments minus money back (MoneyBack): ₹900 dinner, ₹600 paid back → ₹300.
+    val debitsThisMonth = counted.filter { MoneyBack.countsAsSpend(it) && monthOf(it) == thisMonth }
 
     val upcoming = linkedMapOf<Triple<String, Long, LocalDate?>, UpcomingItem>()
     for (c in captures) {
@@ -158,15 +174,16 @@ fun buildMoneyData(
         selectedAccountId = selectedAccountId,
         transactions = items,
         upcoming = upcoming.values.sortedBy { it.dueDate ?: LocalDate.MAX },
-        spentThisMonth = debitsThisMonth.sumOf { it.amountMinor },
-        receivedThisMonth = counted.filter { it.direction == "credit" && monthOf(it) == thisMonth }.sumOf { it.amountMinor },
-        spentLastMonth = counted.filter { it.direction == "debit" && monthOf(it) == lastMonth }.sumOf { it.amountMinor },
+        spentThisMonth = MoneyBack.net(debitsThisMonth),
+        receivedThisMonth = counted.filter { MoneyBack.isIncome(it) && monthOf(it) == thisMonth }.sumOf { it.amountMinor },
+        spentLastMonth = MoneyBack.net(counted.filter { MoneyBack.countsAsSpend(it) && monthOf(it) == lastMonth }),
         topCategories = debitsThisMonth.groupBy { Category.of(it.category) }
             .map { (cat, list) ->
                 val subs = list.groupBy { Category.subOf(it.category) }.filterKeys { it != null }
-                    .map { (s, l) -> s!! to l.sumOf { it.amountMinor } }.sortedByDescending { it.second }
-                CategoryTotal(cat, list.sumOf { it.amountMinor }, subs)
+                    .map { (s, l) -> s!! to MoneyBack.net(l) }.filter { it.second > 0 }.sortedByDescending { it.second }
+                CategoryTotal(cat, MoneyBack.net(list), subs)
             }
+            .filter { it.amountMinor > 0 }
             .sortedByDescending { it.amountMinor },
     )
 }

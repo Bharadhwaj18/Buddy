@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 
-/** Gentle daytime nudges: drink water (when behind on the goal) and move (after an hour without steps). */
+/** Gentle daytime nudges: drink water (when behind on the goal) and move (under 100 steps in the last hour). */
 object Nudges {
     private const val CHANNEL = "nudges"
     private const val WATER_ID = 71
@@ -51,8 +51,21 @@ object Nudges {
     /** Bumped when the goal changes so every water view updates at once. */
     val goalVersion: kotlinx.coroutines.flow.StateFlow<Int> = _goalVersion
 
-    /** Called by the step sampler whenever you've clearly moved. */
-    fun movedNow(context: Context) = prefs(context).edit().putLong("lastMoveAt", System.currentTimeMillis()).apply()
+    /** The move nudge only fires when the last hour had fewer steps than this. */
+    const val MOVE_MIN_STEPS = 100
+
+    /**
+     * Steps in the last hour: the higher of the phone's own count and Health Connect (a watch),
+     * so walking with the phone on the desk still counts. Null when neither source can tell.
+     */
+    suspend fun stepsLastHour(context: Context): Long? {
+        val c = (context.applicationContext as BuddyApp).container
+        val phone = c.steps.phoneStepsLastHour()
+        val watch = runCatching {
+            if (c.health.sdkStatus() == androidx.health.connect.client.HealthConnectClient.SDK_AVAILABLE && c.health.hasPermissions()) c.health.stepsInLast(60) else null
+        }.getOrNull()
+        return listOfNotNull(phone, watch).maxOrNull()
+    }
 
     suspend fun addWater(context: Context, ml: Int, day: LocalDate = LocalDate.now()) {
         val items = (context.applicationContext as BuddyApp).container.items
@@ -67,10 +80,10 @@ object Nudges {
         val p = prefs(context)
         val t = System.currentTimeMillis()
 
-        if (moveOn(context) && (context.applicationContext as BuddyApp).container.steps.hasSensorPermission()) {
-            val lastMove = p.getLong("lastMoveAt", t).also { if (!p.contains("lastMoveAt")) movedNow(context) }
-            if (t - lastMove > 60 * 60_000 && t - p.getLong("moveNudgeAt", 0) > 90 * 60_000) {
-                notify(context, MOVE_ID, "Time to move 🚶", "You've been still for an hour — a 5-minute walk helps.", null)
+        if (moveOn(context) && t - p.getLong("moveNudgeAt", 0) > 60 * 60_000) {
+            val steps = stepsLastHour(context)
+            if (steps != null && steps < MOVE_MIN_STEPS) {
+                notify(context, MOVE_ID, "Time to move 🚶", "Only $steps steps in the last hour. A 5-minute walk helps.", null)
                 p.edit().putLong("moveNudgeAt", t).apply()
             }
         }

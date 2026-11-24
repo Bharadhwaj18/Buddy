@@ -51,8 +51,8 @@ class BuddyWidget : GlanceAppWidget() {
         val month = YearMonth.now()
         val excluded = c.db.accountDao().all().filter { !it.includeInTotals }.map { it.id }.toSet()
         val spent = c.db.transactionDao().all()
-            .filter { it.direction == "debit" && !it.isTransfer && it.accountId !in excluded && YearMonth.from(Instant.ofEpochMilli(it.occurredAt).atZone(zone)) == month }
-            .sumOf { it.amountMinor }
+            .filter { com.shrey.buddy.finance.MoneyBack.countsAsSpend(it) && it.accountId !in excluded && YearMonth.from(Instant.ofEpochMilli(it.occurredAt).atZone(zone)) == month }
+            .let { com.shrey.buddy.finance.MoneyBack.net(it) }
         val openTasks = c.db.taskDao().all().count { it.status != "done" }
         val inr = NumberFormat.getCurrencyInstance(Locale.Builder().setLanguage("en").setRegion("IN").build()).apply { maximumFractionDigits = 0 }
 

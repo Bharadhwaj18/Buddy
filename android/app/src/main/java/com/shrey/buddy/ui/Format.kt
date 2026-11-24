@@ -7,7 +7,7 @@ import java.util.Locale
 
 private val india: Locale = Locale.Builder().setLanguage("en").setRegion("IN").build()
 
-/** Indian grouping (₹1,74,874). Paise only when asked for or when non-zero in detail views. */
+/** Indian grouping (₹1,23,456). Paise only when asked for or when non-zero in detail views. */
 fun inr(minor: Long, paise: Boolean = false): String {
     val f = NumberFormat.getCurrencyInstance(india).apply {
         maximumFractionDigits = if (paise) 2 else 0

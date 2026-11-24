@@ -25,3 +25,6 @@ android/app/src/main/assets/model-*/
 # OS
 .DS_Store
 Thumbs.db
+
+# Laptop (Tauri) build paths for this PC only
+laptop/src-tauri/.cargo/config.toml

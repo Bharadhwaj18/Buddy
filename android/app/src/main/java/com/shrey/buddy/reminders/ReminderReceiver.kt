@@ -48,6 +48,8 @@ class ReminderRearmReceiver : BroadcastReceiver() {
         }
         val pending = goAsync()
         ReminderScheduler.refreshAsync(context).invokeOnCompletion { pending.finish() }
+        // Light routines' alarms are lost on reboot too.
+        ReminderScheduler.scope.launch { runCatching { com.shrey.buddy.lights.Lights.reschedule(context.applicationContext) } }
     }
 }
 
@@ -62,14 +64,23 @@ object ReminderActions {
             if (taskId.isNotEmpty()) {
                 val tasks = (app as BuddyApp).container.tasks
                 val task = tasks.get(taskId)
-                if (task != null && task.deletedAt == null) when (action) {
-                    ReminderReceiver.ACTION_DONE -> tasks.save(task.copy(status = "done"))
-                    ReminderReceiver.ACTION_SNOOZE -> ReminderScheduler.snooze(app, task, minutes)
-                    ReminderReceiver.ACTION_DISMISS -> {
-                        ReminderScheduler.clearSnooze(app, task)
-                        if (task.repeat != null) tasks.skip(task)
+                if (task != null && task.deletedAt == null) {
+                    when (action) {
+                        ReminderReceiver.ACTION_DONE -> tasks.save(task.copy(status = "done"))
+                        ReminderReceiver.ACTION_SNOOZE -> ReminderScheduler.snooze(app, task, minutes)
+                        ReminderReceiver.ACTION_DISMISS -> {
+                            ReminderScheduler.clearSnooze(app, task)
+                            if (task.repeat != null) tasks.skip(task)
+                        }
+                        ReminderReceiver.ACTION_STOP_CALLING -> ReminderScheduler.clearSnooze(app, task)
                     }
-                    ReminderReceiver.ACTION_STOP_CALLING -> ReminderScheduler.clearSnooze(app, task)
+                    // Close the laptop's pop-up for this reminder too.
+                    val ack = when (action) {
+                        ReminderReceiver.ACTION_DONE -> "done"
+                        ReminderReceiver.ACTION_SNOOZE -> "snoozed"
+                        else -> "dismissed"
+                    }
+                    LaptopFirst.ack(app, task, ack, ReminderScheduler.snoozedUntil(app, task).takeIf { ack == "snoozed" })
                 }
             }
             ReminderScheduler.refresh(app)

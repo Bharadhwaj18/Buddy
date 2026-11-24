@@ -1,6 +1,10 @@
 package com.shrey.buddy.ui.money
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -11,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.LocalGasStation
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -170,3 +175,124 @@ fun FuelFields(vm: AppViewModel, state: FuelFormState, amountMinor: Long, onOpen
         }
     }
 }
+
+/**
+ * On money that came in: "this is money back for something I paid". Turning it on files it under a spending
+ * category (so it reduces that category's spend and isn't counted as income); picking the payment links the two
+ * and copies its category.
+ */
+/** Search by payee, category, sub-category, note, account, date ("2 nov") or amount ("900", "₹1,200"). */
+internal fun matchesPayment(t: TxnItem, query: String): Boolean {
+    val q = query.lowercase().replace("₹", "").replace(",", "").trim()
+    if (q.isEmpty()) return true
+    val rupees = t.amountMinor / 100
+    val amountText = listOf(rupees.toString(), "%.2f".format(t.amountMinor / 100.0))
+    if (q.toDoubleOrNull() != null) return amountText.any { it.startsWith(q) }
+    val hay = listOfNotNull(
+        t.title, t.category.label, t.sub, t.note, t.accountName, t.channel,
+        t.date.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.ENGLISH)),
+    ).joinToString(" ").lowercase()
+    return q.split(' ').filter { it.isNotBlank() }.all { it in hay }
+}
+
+@Composable
+fun MoneyBackSection(
+    vm: AppViewModel,
+    credit: TxnItem,
+    on: Boolean,
+    linkedId: String?,
+    onToggle: (Boolean) -> Unit,
+    onPick: (TxnItem?) -> Unit,
+) {
+    val money by vm.money.collectAsStateWithLifecycle()
+    var query by remember { mutableStateOf("") }
+    var showAll by remember { mutableStateOf(false) }
+    // Any payment up to 2 days after the money back (you can't be paid back for something not yet paid).
+    val payments = remember(money.transactions, credit.id) {
+        money.transactions.filter { !it.isCredit && !it.isTransfer && !it.date.isAfter(credit.date.plusDays(2)) }
+    }
+    val candidates = remember(payments, query, showAll) {
+        val q = query.trim()
+        when {
+            q.isNotEmpty() -> payments.filter { matchesPayment(it, q) }.sortedByDescending { it.at }.take(50)
+            showAll -> payments.sortedByDescending { it.at }.take(100)
+            else -> payments
+                .filter { !it.date.isBefore(credit.date.minusDays(60)) }
+                // Payments at least as big as the money back first, then the closest in time.
+                .sortedWith(compareBy<TxnItem> { if (it.amountMinor >= credit.amountMinor) 0 else 1 }.thenBy { kotlin.math.abs(it.date.toEpochDay() - credit.date.toEpochDay()) })
+                .take(8)
+        }
+    }
+    val linked = linkedId?.let { id -> payments.firstOrNull { it.id == id } }
+    Column(Modifier.padding(top = 18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Money back for something I paid", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Someone paid you back, or a refund. It reduces that category's spending instead of counting as income.",
+                    style = MaterialTheme.typography.bodySmall, color = BuddyColors.TextTertiary,
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = on, onCheckedChange = onToggle,
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedThumbColor = BuddyColors.OnLime, checkedTrackColor = BuddyColors.Lime),
+            )
+        }
+        if (on) {
+            Text("Which payment? (optional)", style = MaterialTheme.typography.labelLarge, color = BuddyColors.TextSecondary, modifier = Modifier.padding(top = 10.dp))
+            OutlinedTextField(
+                value = query, onValueChange = { query = it },
+                placeholder = { Text("Search payments: name, category, note or amount") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            )
+            val q = query.trim()
+            Text(
+                when {
+                    q.isNotEmpty() -> if (candidates.isEmpty()) "No payments match \"$q\"." else "${candidates.size} matching${if (candidates.size == 50) " (newest 50)" else ""}"
+                    showAll -> "All payments, newest first"
+                    candidates.isEmpty() -> "No payments in the 2 months before this. Search, or just pick the category below."
+                    else -> "Suggested: similar amounts around that date"
+                },
+                style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary, modifier = Modifier.padding(top = 4.dp),
+            )
+            // The chosen payment stays visible even when it isn't in the current list.
+            val shown = if (linked != null && candidates.none { it.id == linked.id }) listOf(linked) + candidates else candidates
+            shown.forEach { d ->
+                val selected = d.id == linkedId
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) BuddyColors.Lime.copy(alpha = 0.12f) else BuddyColors.Surface)
+                        .clickable { onPick(if (selected) null else d) }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material3.RadioButton(selected = selected, onClick = { onPick(if (selected) null else d) })
+                    Column(Modifier.weight(1f)) {
+                        Text(d.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                        Text(
+                            listOfNotNull(listOfNotNull(d.category.label, d.sub).joinToString(" › "), d.date.format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))).joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary,
+                        )
+                    }
+                    Text("−${inr(d.amountMinor)}", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            if (q.isEmpty()) {
+                TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Show suggestions" else "Show all payments") }
+            }
+            linkedId?.let { id ->
+                linked?.let { d ->
+                    val net = d.amountMinor - credit.amountMinor - d.backMinor.let { if (credit.backForId == id) it - credit.amountMinor else it }
+                    Text(
+                        "${d.title}: ${inr(d.amountMinor)} paid, ${inr(d.amountMinor - net)} back → you spent ${inr(net.coerceAtLeast(0))}",
+                        style = MaterialTheme.typography.labelMedium, color = BuddyColors.Lime, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+

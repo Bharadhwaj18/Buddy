@@ -212,6 +212,8 @@ class ReminderRingService : Service() {
         fun ring(context: Context, info: RingInfo) {
             ReminderRinging.set(info)
             ContextCompat.startForegroundService(context, Intent(context, ReminderRingService::class.java))
+            // Light routines linked to reminders (flash, wake-up brighten).
+            runCatching { com.shrey.buddy.lights.Lights.onReminderRinging(context.applicationContext, info.title) }
         }
 
         /** Stops ringing without the "missed" notification (the user answered). */

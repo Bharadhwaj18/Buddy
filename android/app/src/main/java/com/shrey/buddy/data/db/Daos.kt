@@ -116,6 +116,9 @@ interface CaptureDao {
     @Query("SELECT COUNT(*) FROM capture_inbox WHERE status = :status")
     fun observeCount(status: String): Flow<Int>
 
+    @Query("SELECT * FROM capture_inbox WHERE status = :status ORDER BY receivedAt DESC")
+    fun observeWithStatus(status: String): Flow<List<CaptureEntity>>
+
     @Query("SELECT * FROM capture_inbox WHERE status = 'parsed' ORDER BY receivedAt DESC")
     fun observeParsed(): Flow<List<CaptureEntity>>
 

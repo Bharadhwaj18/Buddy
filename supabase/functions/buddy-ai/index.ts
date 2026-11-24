@@ -313,6 +313,18 @@ async function loadAccounts(db: SupabaseClient): Promise<Map<string, Json>> {
   return new Map((data ?? []).map((a) => [a.id as string, a as Json]));
 }
 
+/** Money in filed under a spending category is money back (₹900 dinner, ₹600 paid back → ₹300 spent). */
+const INCOME_CATEGORIES = new Set(["salary", "income", "refunds", "transfer"]);
+function isMoneyBack(r: Json): boolean {
+  return r.direction === "credit" && !r.is_transfer && !INCOME_CATEGORIES.has(String(r.category ?? "").split("/")[0]);
+}
+/** What a transaction adds to spending: + payment, − money back, null if it isn't spending. */
+function spendOf(r: Json): number | null {
+  if (r.is_transfer) return null;
+  if (r.direction === "debit") return Number(r.amount_minor);
+  return isMoneyBack(r) ? -Number(r.amount_minor) : null;
+}
+
 async function loadTransactions(db: SupabaseClient, args: Json, max: number): Promise<Json[]> {
   let q = db
     .from("transactions")
@@ -323,7 +335,10 @@ async function loadTransactions(db: SupabaseClient, args: Json, max: number): Pr
     .order("occurred_at", { ascending: false })
     .limit(max);
   if (!args.include_transfers) q = q.eq("is_transfer", false);
-  if (args.category) q = q.eq("category", args.category as string);
+  if (args.category) {
+    const cat = String(args.category).replace(/[^a-zA-Z0-9 _/-]/g, "");
+    q = cat.includes("/") ? q.eq("category", cat) : q.or(`category.eq.${cat},category.like.${cat}/*`);
+  }
   if (args.direction) q = q.eq("direction", args.direction as string);
   if (args.search) q = q.ilike("payee", `%${String(args.search).replace(/[%_]/g, "")}%`);
   const { data, error } = await q;
@@ -352,7 +367,12 @@ async function runTool(db: SupabaseClient, name: string, args: Json): Promise<Js
     }
     case "spending_summary": {
       const accounts = await loadAccounts(db);
-      const rows = await loadTransactions(db, { direction: "debit", ...args }, 5000);
+      // Spending (the default) is payments minus money back; "credit" lists money in as before.
+      const wantCredit = args.direction === "credit";
+      const { direction: _d, ...rest } = args;
+      const all = await loadTransactions(db, wantCredit ? { direction: "credit", ...rest } : rest, 5000);
+      const rows = wantCredit ? all.filter((r) => !isMoneyBack(r)) : all.filter((r) => spendOf(r) !== null);
+      const amountOf = (r: Json) => (wantCredit ? Number(r.amount_minor) : spendOf(r)!);
       const groups = new Map<string, { total: number; count: number }>();
       for (const r of rows) {
         const key =
@@ -361,14 +381,14 @@ async function runTool(db: SupabaseClient, name: string, args: Json): Promise<Js
           : args.group_by === "merchant" ? safePayee(r)
           : String(r.category);
         const g = groups.get(key) ?? { total: 0, count: 0 };
-        g.total += r.amount_minor as number;
+        g.total += amountOf(r);
         g.count += 1;
         groups.set(key, g);
       }
       const totals = [...groups.entries()]
         .map(([key, g]) => ({ key, amount: rupees(g.total), transactions: g.count }))
         .sort((a, b) => b.amount - a.amount);
-      return { total: rupees(rows.reduce((s, r) => s + (r.amount_minor as number), 0)), groups: totals.slice(0, 30) };
+      return { total: rupees(Math.max(0, rows.reduce((s, r) => s + amountOf(r), 0))), groups: totals.filter((g) => g.amount > 0).slice(0, 30) };
     }
     case "list_accounts": {
       const accounts = await loadAccounts(db);
@@ -852,12 +872,13 @@ async function gatherContext(db: SupabaseClient, today: string, client: Json): P
     .is("deleted_at", null).eq("is_transfer", false)
     .gte("occurred_at", `${from60}T00:00:00+05:30`);
   const spend = (fromD: string, toD: string) => (txns ?? [])
-    .filter((t) => t.direction === "debit" && String(t.occurred_at).slice(0, 10) >= fromD && String(t.occurred_at).slice(0, 10) <= toD)
-    .reduce((s, t) => s + Number(t.amount_minor), 0);
+    .filter((t) => spendOf(t) !== null && String(t.occurred_at).slice(0, 10) >= fromD && String(t.occurred_at).slice(0, 10) <= toD)
+    .reduce((s, t) => s + spendOf(t)!, 0);
   const byCat = new Map<string, number>();
   for (const t of txns ?? []) {
-    if (t.direction === "debit" && String(t.occurred_at).slice(0, 10) >= monthStart) {
-      byCat.set(String(t.category), (byCat.get(String(t.category)) ?? 0) + Number(t.amount_minor));
+    if (spendOf(t) !== null && String(t.occurred_at).slice(0, 10) >= monthStart) {
+      const cat = String(t.category).split("/")[0];
+      byCat.set(cat, (byCat.get(cat) ?? 0) + spendOf(t)!);
     }
   }
 

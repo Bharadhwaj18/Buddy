@@ -41,6 +41,7 @@ class CaptureRepository(
 
     fun observeRecent(limit: Int = 20): Flow<List<CaptureEntity>> = db.captureDao().observeRecent(limit)
     fun observeCount(status: String): Flow<Int> = db.captureDao().observeCount(status)
+    fun observeUnrecognised(): Flow<List<CaptureEntity>> = db.captureDao().observeWithStatus(STATUS_UNRECOGNISED)
     fun observeParsed(): Flow<List<CaptureEntity>> = db.captureDao().observeParsed()
 
     fun decode(capture: CaptureEntity): SmsParse = json.decodeFromString(SmsParse.serializer(), capture.payload)
@@ -99,6 +100,17 @@ class CaptureRepository(
             }
         }
         return changed
+    }
+
+    /**
+     * After an app update, re-read stored messages once with the new parsers, so messages that
+     * weren't understood before become transactions without a manual re-scan.
+     */
+    suspend fun reparseAfterUpdate(versionCode: Int) = withContext(Dispatchers.IO) {
+        val prefs = context.getSharedPreferences("capture", Context.MODE_PRIVATE)
+        if (prefs.getInt("parsedWithVersion", 0) == versionCode) return@withContext
+        reparseAll()
+        prefs.edit().putInt("parsedWithVersion", versionCode).apply()
     }
 
     /** Backfill from the SMS inbox. Requires READ_SMS. Raw text stays in the local DB only. */

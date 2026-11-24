@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.WarningAmber
@@ -97,6 +98,9 @@ fun MoneyScreen(vm: AppViewModel, lvm: LifeViewModel, onOpenAccounts: () -> Unit
         required = 2,
     )
     var editing by remember { mutableStateOf<TxnItem?>(null) }
+    var showUnrecognised by remember { mutableStateOf(false) }
+    // The by-category view: a category to open on, or BrowseAll; null = closed.
+    var browsing by remember { mutableStateOf<Any?>(null) }
     // Opened from a "Buddy captured" notification: show that transaction once it has loaded.
     val openTxn by vm.openTxn.collectAsStateWithLifecycle()
     LaunchedEffect(openTxn, money.transactions) {
@@ -192,10 +196,16 @@ fun MoneyScreen(vm: AppViewModel, lvm: LifeViewModel, onOpenAccounts: () -> Unit
         if (money.topCategories.isNotEmpty()) {
             item {
                 BuddyCard(Modifier.fillMaxWidth()) {
-                    Text("Where it went this month", style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Where it went this month", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { browsing = BrowseAll }) { Text("See all") }
+                    }
                     val max = money.topCategories.first().amountMinor.coerceAtLeast(1)
                     money.topCategories.take(6).forEach { ct ->
-                        Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.padding(top = 12.dp).clip(RoundedCornerShape(10.dp)).clickable { browsing = ct.category },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Icon(ct.category.icon, null, tint = ct.category.color, modifier = Modifier.size(18.dp))
                             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                                 Text(ct.category.label, style = MaterialTheme.typography.bodySmall)
@@ -302,11 +312,11 @@ fun MoneyScreen(vm: AppViewModel, lvm: LifeViewModel, onOpenAccounts: () -> Unit
 
         if (unrecognised > 0) {
             item {
-                BuddyCard(Modifier.fillMaxWidth(), color = BuddyColors.Red.copy(alpha = 0.12f), contentPadding = 16.dp) {
+                BuddyCard(Modifier.fillMaxWidth(), color = BuddyColors.Red.copy(alpha = 0.12f), contentPadding = 16.dp, onClick = { showUnrecognised = true }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.WarningAmber, null, tint = BuddyColors.Red)
                         Text(
-                            "$unrecognised bank message${if (unrecognised == 1) "" else "s"} need a parser update",
+                            "$unrecognised bank message${if (unrecognised == 1) "" else "s"} need a parser update · tap to see",
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(start = 12.dp),
                         )
@@ -367,18 +377,31 @@ fun MoneyScreen(vm: AppViewModel, lvm: LifeViewModel, onOpenAccounts: () -> Unit
 
     if (adding) AddTransactionSheet(vm, money.accounts, onDismiss = { adding = false })
 
+    if (showUnrecognised) UnrecognisedSheet(vm) { showUnrecognised = false }
+
+    browsing?.let { b ->
+        com.shrey.buddy.ui.money.CategoryBrowser(
+            transactions = money.transactions,
+            initial = b as? Category,
+            onEdit = { editing = it },
+            onDismiss = { browsing = null },
+        )
+    }
+
     editing?.let { t ->
         TxnEditSheet(
             vm, t,
             onDismiss = { editing = null },
             onDelete = { vm.deleteTransaction(t.id, t.title); editing = null },
             onOpenVehicles = { editing = null; onOpenModule(LifeModule.VEHICLES) },
-        ) { category, sub, transfer, note, fuel ->
-            vm.updateTransaction(t, category, sub, transfer, note, fuel)
+        ) { category, sub, transfer, note, fuel, backFor ->
+            vm.updateTransaction(t, category, sub, transfer, note, fuel, backFor)
             editing = null
         }
     }
 }
+
+private object BrowseAll
 
 @Composable
 private fun AccountCard(title: String, detail: String, balance: Long?, selected: Boolean, onClick: () -> Unit) {
@@ -407,8 +430,15 @@ private val timeFormat: DateFormat = DateFormat.getTimeInstance(DateFormat.SHORT
 
 @Composable
 fun TxnRow(t: TxnItem, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+    val moneyBack = t.isCredit && !t.isTransfer && !t.category.isIncome && t.category != Category.TRANSFER
     val subtitle = listOfNotNull(
-        if (t.isTransfer) "Transfer" else listOfNotNull(t.category.label, t.sub).joinToString(" › "),
+        when {
+            t.isTransfer -> "Transfer"
+            moneyBack -> "Money back · " + listOfNotNull(t.category.label, t.sub).joinToString(" › ") + (t.backFor?.let { " (for $it)" } ?: "")
+            else -> listOfNotNull(t.category.label, t.sub).joinToString(" › ")
+        },
+        // ₹900 dinner with ₹600 paid back.
+        if (t.backMinor > 0) "${inr(t.backMinor)} back · net ${inr((t.amountMinor - t.backMinor).coerceAtLeast(0))}" else null,
         t.accountName,
         timeFormat.format(Date(t.at)),
     ).joinToString(" · ")
@@ -437,14 +467,21 @@ fun TxnRow(t: TxnItem, modifier: Modifier = Modifier, onClick: (() -> Unit)? = n
 @Composable
 private fun TxnEditSheet(
     vm: AppViewModel, t: TxnItem, onDismiss: () -> Unit, onDelete: () -> Unit, onOpenVehicles: () -> Unit,
-    onSave: (Category, String?, Boolean, String?, com.shrey.buddy.finance.FuelEntry?) -> Unit,
+    onSave: (Category, String?, Boolean, String?, com.shrey.buddy.finance.FuelEntry?, String?) -> Unit,
 ) {
     var category by remember { mutableStateOf(t.category) }
     var sub by remember { mutableStateOf(t.sub) }
     val fuel = com.shrey.buddy.ui.money.rememberFuelForm(vm, t.id)
     var transfer by remember { mutableStateOf(t.isTransfer) }
     var note by remember { mutableStateOf(t.note.orEmpty()) }
-    val choices = if (t.isCredit) Category.income + Category.spending else Category.spending + Category.income
+    // Money in filed under a spending category = money back (it lowers that category's spend).
+    var moneyBack by remember { mutableStateOf(t.isCredit && !t.isTransfer && !t.category.isIncome && t.category != Category.TRANSFER) }
+    var backFor by remember { mutableStateOf(t.backForId) }
+    val choices = when {
+        !t.isCredit -> Category.spending + Category.income
+        moneyBack -> Category.spending
+        else -> Category.income
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -470,6 +507,21 @@ private fun TxnEditSheet(
                     checked = transfer,
                     onCheckedChange = { transfer = it },
                     colors = SwitchDefaults.colors(checkedThumbColor = BuddyColors.OnLime, checkedTrackColor = BuddyColors.Lime),
+                )
+            }
+
+            if (t.isCredit && !transfer) {
+                com.shrey.buddy.ui.money.MoneyBackSection(
+                    vm, t, moneyBack, backFor,
+                    onToggle = { on ->
+                        moneyBack = on
+                        if (on && category.isIncome) { category = Category.OTHER; sub = null }
+                        if (!on) { backFor = null; if (!category.isIncome) { category = Category.INCOME; sub = null } }
+                    },
+                    onPick = { d ->
+                        backFor = d?.id
+                        if (d != null) { category = d.category; sub = d.sub }
+                    },
                 )
             }
 
@@ -515,7 +567,7 @@ private fun TxnEditSheet(
             )
 
             Button(
-                onClick = { onSave(category, sub, transfer, note, if (category == Category.FUEL) fuel.entry() else null) },
+                onClick = { onSave(category, sub, transfer, note, if (category == Category.FUEL) fuel.entry() else null, backFor.takeIf { moneyBack }) },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(52.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = BuddyColors.Lime, contentColor = BuddyColors.OnLime),
@@ -531,3 +583,50 @@ private fun TxnEditSheet(
         }
     }
 }
+
+/**
+ * Bank messages no parser understood. "Copy" puts them on the clipboard with long numbers masked
+ * (account and reference numbers keep only their last 4 digits), ready to paste into a chat for a parser fix.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UnrecognisedSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val list by vm.unrecognised.collectAsStateWithLifecycle()
+    val masked = remember(list) { list.map { it.source to maskNumbers(it.rawText) } }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = BuddyColors.Surface) {
+        Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
+            Text("Messages Buddy couldn't read", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Long numbers are masked. Copy them and send them over so the parser can learn these formats.",
+                style = MaterialTheme.typography.bodySmall, color = BuddyColors.TextTertiary,
+            )
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(masked) { (sender, body) ->
+                    Surface(shape = RoundedCornerShape(14.dp), color = BuddyColors.SurfaceHigh) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                            Text(sender, style = MaterialTheme.typography.labelMedium, color = BuddyColors.Lime)
+                            Text(body, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+            Button(
+                onClick = {
+                    val text = masked.joinToString("\n\n") { (s, b) -> "$s\t$b" }
+                    val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Unrecognised bank SMS", text))
+                    android.widget.Toast.makeText(context, "Copied ${masked.size} message${if (masked.size == 1) "" else "s"}", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                enabled = masked.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp).height(50.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = BuddyColors.Lime, contentColor = BuddyColors.OnLime),
+            ) { Text("Copy all (masked)") }
+        }
+    }
+}
+
+/** Keeps only the last 4 digits of any run of 6+ digits (account, card, reference numbers); amounts stay readable. */
+internal fun maskNumbers(text: String): String =
+    Regex("""(?<![\d.,])\d{6,}(?![\d.,]\d)""").replace(text) { m -> "X".repeat(m.value.length - 4) + m.value.takeLast(4) }

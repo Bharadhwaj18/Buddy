@@ -512,7 +512,7 @@ fun MoveNudgeRow() {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Move nudges", style = MaterialTheme.typography.bodyMedium)
-                Text("A reminder after an hour without steps (9 am – 9 pm)", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
+                Text("Only when the last hour had under 100 steps (9 am – 9 pm)", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
             }
             Switch(on, { on = it; Nudges.setMove(context, it) }, colors = SwitchDefaults.colors(checkedThumbColor = BuddyColors.OnLime, checkedTrackColor = BuddyColors.Lime))
         }

@@ -113,6 +113,7 @@ fun AppShell(vm: AppViewModel, startAt: String? = null) {
             "coach" -> nav.navigate(CoachRoute)
             "workout" -> nav.navigate(if (hvm.session.state.value != null) WorkoutLoggerRoute else WorkoutsRoute)
             "insights" -> nav.navigate(LifeRoute(LifeModule.INSIGHTS.name))
+            "lights" -> nav.navigate(LifeRoute(LifeModule.LIGHTS.name))
             else -> if (startAt?.startsWith("txn:") == true) {
                 nav.switchTab(MoneyRoute)
                 vm.openTransaction(startAt.removePrefix("txn:"))

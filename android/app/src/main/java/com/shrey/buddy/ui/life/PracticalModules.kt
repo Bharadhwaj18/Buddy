@@ -1,5 +1,16 @@
 package com.shrey.buddy.ui.life
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -80,7 +91,13 @@ fun VehiclesScreen(lvm: LifeViewModel, onBack: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     var logFor by remember { mutableStateOf<Item<Vehicle>?>(null) }
     var editLog by remember { mutableStateOf<Item<VehicleLog>?>(null) }
+    var historyFor by remember { mutableStateOf<Item<Vehicle>?>(null) }
     val color = LifeModule.VEHICLES.color
+
+    historyFor?.let { v ->
+        // The edit sheet opens on top of the history, so history stays open behind it.
+        VehicleHistory(v, logs.filter { it.refId == v.id }, color, onEdit = { editLog = it; logFor = v }, onDismiss = { historyFor = null })
+    }
 
     ModuleScaffold(LifeModule.VEHICLES, lvm, onBack, onAdd = { adding = true }) {
         if (vehicles.isEmpty()) item { EmptyNote("Add your bike or car to track fuel, service and renewals.") }
@@ -120,7 +137,12 @@ fun VehiclesScreen(lvm: LifeViewModel, onBack: () -> Unit) {
                             modifier = Modifier,
                         ) { TextButton(onClick = { editLog = l; logFor = v }) { Text("Edit", color = BuddyColors.TextTertiary) } }
                     }
-                    OutlinedButton(onClick = { editLog = null; logFor = v }, modifier = Modifier.padding(top = 8.dp)) { Text("Add fuel / service") }
+                    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { editLog = null; logFor = v }) { Text("Add fuel / service") }
+                        if (vLogs.isNotEmpty()) TextButton(onClick = { historyFor = v }) {
+                            Text(if (vLogs.size > 5) "See all ${vLogs.size}" else "History", color = color)
+                        }
+                    }
                 }
             }
         }
@@ -189,6 +211,103 @@ fun VehiclesScreen(lvm: LifeViewModel, onBack: () -> Unit) {
             Field(note, { note = it }, "Note", accent = color)
             DateField("Date", day, { day = it ?: LocalDate.now() }, allowClear = false)
             if (l == null && type == "fuel") com.shrey.buddy.ui.components.ToggleField("Also add to Money", toMoney, { toMoney = it }, subtitle = "As a Fuel transaction on your primary account")
+        }
+    }
+}
+
+/** Every fuel / service / repair entry for one vehicle, filterable, newest first, grouped by month. */
+@Composable
+private fun VehicleHistory(
+    v: Item<Vehicle>,
+    logs: List<Item<VehicleLog>>,
+    color: androidx.compose.ui.graphics.Color,
+    onEdit: (Item<VehicleLog>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var type by remember { mutableStateOf<String?>(null) }
+    var year by remember { mutableStateOf<Int?>(null) }
+    val years = remember(logs) { logs.mapNotNull { it.date?.year }.distinct().sortedDescending() }
+    val shown = logs
+        .filter { type == null || it.data.type == type }
+        .filter { year == null || it.date?.year == year }
+        .sortedWith(compareByDescending<Item<VehicleLog>> { it.date }.thenByDescending { it.data.odometerKm })
+    val fmtMonth = java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.ENGLISH)
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Column(
+            Modifier.fillMaxSize().background(BuddyColors.Background)
+                .statusBarsPadding().navigationBarsPadding(),
+        ) {
+            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
+                Column {
+                    Text(v.data.name, style = MaterialTheme.typography.titleLarge)
+                    Text("${logs.size} entr${if (logs.size == 1) "y" else "ies"}", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
+                }
+            }
+            androidx.compose.foundation.lazy.LazyColumn(
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item {
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item { FilterChip(selected = type == null, onClick = { type = null }, label = { Text("All") }) }
+                        items(logTypes.filter { (k, _) -> logs.any { it.data.type == k } }) { (k, label) ->
+                            FilterChip(selected = type == k, onClick = { type = if (type == k) null else k }, label = { Text(label) })
+                        }
+                    }
+                    if (years.size > 1) androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                        item { FilterChip(selected = year == null, onClick = { year = null }, label = { Text("All years") }) }
+                        items(years) { y -> FilterChip(selected = year == y, onClick = { year = if (year == y) null else y }, label = { Text("$y") }) }
+                    }
+                }
+                item {
+                    val fuel = shown.filter { it.data.type == "fuel" }
+                    BuddyCard(Modifier.fillMaxWidth(), contentPadding = 16.dp) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                            Column {
+                                Text(inr(shown.sumOf { it.data.amountMinor }), style = MaterialTheme.typography.titleMedium)
+                                Text("Spent · ${shown.size} entr${if (shown.size == 1) "y" else "ies"}", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
+                            }
+                            val litres = fuel.sumOf { it.data.litres }
+                            if (litres > 0) Column {
+                                Text("%.1f L".format(litres), style = MaterialTheme.typography.titleMedium)
+                                Text("Fuel · ${fuel.size} fill${if (fuel.size == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
+                            }
+                        }
+                    }
+                }
+                if (shown.isEmpty()) item { EmptyNote("Nothing here yet.") }
+                shown.groupBy { it.date?.let { d -> java.time.YearMonth.from(d) } }.forEach { (month, list) ->
+                    item(key = "m:$month:$type:$year") {
+                        Column {
+                            Row(Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
+                                Text(month?.format(fmtMonth) ?: "No date", style = MaterialTheme.typography.labelLarge, color = BuddyColors.TextSecondary, modifier = Modifier.weight(1f))
+                                Text(inr(list.sumOf { it.data.amountMinor }), style = MaterialTheme.typography.labelLarge, color = BuddyColors.TextTertiary)
+                            }
+                            BuddyCard(Modifier.fillMaxWidth(), contentPadding = 8.dp) {
+                                list.forEach { l ->
+                                    ListRow(
+                                        icon = if (l.data.type == "fuel") Icons.Rounded.LocalGasStation else Icons.Rounded.Build,
+                                        tint = color,
+                                        title = "${logTypes.firstOrNull { it.first == l.data.type }?.second ?: l.data.type} · ${inr(l.data.amountMinor)}",
+                                        subtitle = listOfNotNull(
+                                            l.date?.let { friendlyDay(it) },
+                                            if (l.data.litres > 0) "${l.data.litres} L" else null,
+                                            if (l.data.odometerKm > 0) "%,d km".format(l.data.odometerKm) else null,
+                                            l.data.note.ifBlank { null },
+                                        ).joinToString(" · "),
+                                        modifier = Modifier.clickable { onEdit(l) },
+                                    ) { TextButton(onClick = { onEdit(l) }) { Text("Edit", color = BuddyColors.TextTertiary) } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

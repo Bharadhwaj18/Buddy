@@ -120,7 +120,10 @@ fun RunDetailScreen(hvm: HealthViewModel, workoutId: String, onBack: () -> Unit)
         val track = RunRecord.track(run)
         val detail = RunRecord.hasDetail(run)
 
-        item {
+        if (track.size < 2) item {
+            // Watch activity without a route yet: no empty map, offer to load it from Health Connect.
+            NoRouteCard(item, onRoute = { hvm.attachRoute(item, it) })
+        } else item {
             Box(Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(22.dp))) {
                 RouteMap(paceSegments(track, detail), Modifier.fillMaxSize())
             }
@@ -178,6 +181,34 @@ fun RunDetailScreen(hvm: HealthViewModel, workoutId: String, onBack: () -> Unit)
             confirmButton = { TextButton(onClick = { hvm.deleteWorkout(item.id); confirmDelete = false; onBack() }) { Text("Delete", color = BuddyColors.Red) } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
+    }
+}
+
+@Composable
+private fun NoRouteCard(item: Item<Workout>, onRoute: (androidx.health.connect.client.records.ExerciseRoute) -> Unit) {
+    var note by remember { mutableStateOf<String?>(null) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.health.connect.client.contracts.ExerciseRouteRequestContract(),
+    ) { route ->
+        if (route != null && route.route.size >= 2) onRoute(route)
+        else note = "No GPS route came through for this one. It may have been indoors, or the watch app didn't share it."
+    }
+    BuddyCard(Modifier.fillMaxWidth()) {
+        Text("No map for this activity yet", style = MaterialTheme.typography.titleMedium)
+        if (item.data.hcId.isNotEmpty()) {
+            Text(
+                note ?: "Health Connect asks before sharing a route recorded by another app. Load it to see the map, splits and pace.",
+                style = MaterialTheme.typography.bodySmall, color = BuddyColors.TextSecondary, modifier = Modifier.padding(top = 4.dp),
+            )
+            TextButton(onClick = { note = null; runCatching { launcher.launch(item.data.hcId) }.onFailure { note = "Health Connect couldn't open the route request." } }) {
+                Text("Load route")
+            }
+        } else {
+            Text(
+                "This activity was saved without GPS points.",
+                style = MaterialTheme.typography.bodySmall, color = BuddyColors.TextSecondary, modifier = Modifier.padding(top = 4.dp),
+            )
+        }
     }
 }
 

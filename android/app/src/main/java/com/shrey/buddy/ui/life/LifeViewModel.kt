@@ -14,6 +14,7 @@ import androidx.compose.material.icons.rounded.EventRepeat
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.StickyNote2
@@ -65,6 +66,7 @@ enum class LifeModule(val label: String, val icon: ImageVector, val color: Color
     PEOPLE("People", Icons.Rounded.People, Color(0xFFFF6FAE), "Birthdays & catch-ups"),
     READING("Reading", Icons.AutoMirrored.Rounded.MenuBook, Color(0xFF30D5C8), "Books & courses"),
     VEHICLES("Vehicles", Icons.Rounded.DirectionsCar, BuddyColors.Fitness, "Fuel, service, renewals"),
+    LIGHTS("Lights", Icons.Rounded.Lightbulb, Color(0xFFFFC94D), "WiZ bulbs, scenes & routines"),
     WISHLIST("Wishlist", Icons.Rounded.ShoppingBag, Color(0xFFBF5AF2), "Think before you buy"),
     VAULT("Documents", Icons.Rounded.Folder, Color(0xFFB0B4BC), "IDs, insurance, warranties"),
     NET_WORTH("Net worth", Icons.AutoMirrored.Rounded.TrendingUp, Color(0xFF34C759), "Investments & balances"),
@@ -162,6 +164,61 @@ class LifeViewModel(private val c: AppContainer) : ViewModel() {
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()
     fun clearMessage() { _message.value = null }
+
+    // ---- Lights (WiZ) ----
+    val lights = obs(Kinds.LIGHT, com.shrey.buddy.data.items.Light.serializer())
+    val lightRoutines = obs(Kinds.LIGHT_ROUTINE, com.shrey.buddy.data.items.LightRoutine.serializer())
+
+    fun findLights() = viewModelScope.launch {
+        _busy.value = "Looking for lights on this Wi-Fi…"
+        val (found, added) = runCatching { com.shrey.buddy.lights.Lights.discover(c.context) }.getOrDefault(0 to 0)
+        _busy.value = null
+        _message.value = when {
+            com.shrey.buddy.lights.Wiz.wifi(c.context) == null -> "Connect the phone to your home Wi-Fi first."
+            found == 0 -> "No WiZ lights answered. In the WiZ app's settings, turn on \"Allow local communication\", then try again (or add a bulb by its IP)."
+            added > 0 -> "Found $found light${if (found == 1) "" else "s"} ($added new). Give them names and rooms."
+            else -> "All $found light${if (found == 1) "" else "s"} found."
+        }
+    }
+
+    fun addLightByIp(ip: String) = viewModelScope.launch {
+        _busy.value = "Asking $ip…"
+        val light = runCatching { com.shrey.buddy.lights.Lights.addByIp(c.context, ip) }.getOrNull()
+        _busy.value = null
+        _message.value = light?.let { "Added ${it.name}. Give it a name and room." }
+            ?: "Nothing answered at $ip. Check the address, and that \"Allow local communication\" is on in the WiZ app."
+    }
+
+    fun lightAction(action: com.shrey.buddy.data.items.LightAction, quiet: Boolean = true) = viewModelScope.launch {
+        val said = runCatching { com.shrey.buddy.lights.Lights.apply(c.context, action) }.getOrElse { it.message ?: "Couldn't reach the lights" }
+        if (!quiet || said.startsWith("Couldn't") || said.startsWith("Can't") || said.startsWith("No lights") || said.contains(" of ")) _message.value = said
+    }
+
+    /** One bulb on/off (finding it again if its address changed). */
+    fun lightActionFor(light: com.shrey.buddy.data.items.Light, on: Boolean) = viewModelScope.launch {
+        val pilot = com.shrey.buddy.lights.WizPilot(on = on)
+        var ok = com.shrey.buddy.lights.Wiz.set(c.context, listOf(light.ip), pilot)[light.ip] == true
+        if (!ok) {
+            com.shrey.buddy.lights.Lights.discover(c.context)
+            val ip = com.shrey.buddy.lights.Lights.lights(c.context).firstOrNull { it.data.mac == light.mac }?.data?.ip
+            ok = ip != null && com.shrey.buddy.lights.Wiz.set(c.context, listOf(ip), pilot)[ip] == true
+        }
+        if (!ok) _message.value = "${light.name} didn't answer. Is it powered on, on this Wi-Fi?"
+    }
+
+    fun runLightRoutine(r: com.shrey.buddy.data.items.LightRoutine) = viewModelScope.launch {
+        _message.value = runCatching { com.shrey.buddy.lights.Lights.run(c.context, r) }.getOrElse { it.message ?: "Couldn't reach the lights" }
+    }
+
+    fun saveLightRoutine(r: com.shrey.buddy.data.items.LightRoutine, id: String?) = viewModelScope.launch {
+        items.put(Kinds.LIGHT_ROUTINE, r, com.shrey.buddy.data.items.LightRoutine.serializer(), id = id)
+        runCatching { com.shrey.buddy.lights.Lights.reschedule(c.context) }
+    }
+
+    fun deleteItemAndReschedule(id: String) = viewModelScope.launch {
+        items.delete(id)
+        runCatching { com.shrey.buddy.lights.Lights.reschedule(c.context) }
+    }
 
     fun <T> save(kind: String, data: T, serializer: KSerializer<T>, id: String? = null, date: LocalDate? = null, refId: String? = null) =
         viewModelScope.launch { items.put(kind, data, serializer, id = id, occurredOn = date, refId = refId) }

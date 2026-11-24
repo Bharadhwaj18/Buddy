@@ -1,6 +1,6 @@
 # Builds a signed release APK and publishes it to the private "releases" bucket for the in-app updater.
 #   powershell -File scripts\release.ps1 -Notes "What changed"
-# Needs: `npx supabase login` done once on this PC (used to fetch an upload key at runtime; nothing is stored).
+# Needs: `npx supabase login` done once on this PC, or a token in ~/.buddy/supabase-token (see step 3).
 #   powershell -File scripts\release.ps1 -UploadOnly   (re-upload the APK already built, same version)
 param([string]$Notes = "", [switch]$UploadOnly)
 $ErrorActionPreference = "Stop"
@@ -48,6 +48,10 @@ $sha = (Get-FileHash $apk -Algorithm SHA256).Hash.ToLower()
 Write-Output ("APK {0:N1} MB, sha256 {1}" -f ((Get-Item $apk).Length / 1MB), $sha.Substring(0, 12))
 
 # 3. Upload with a server key fetched through the CLI login (kept in memory only, never printed).
+# If this PC's CLI login is a different Supabase account, put a personal access token for this
+# project's account in ~/.buddy/supabase-token; it's used for this run only and the login is left as is.
+$tokenFile = Join-Path $env:USERPROFILE ".buddy\supabase-token"
+if (Test-Path $tokenFile) { $env:SUPABASE_ACCESS_TOKEN = (Get-Content $tokenFile -Raw).Trim() }
 Push-Location $root
 # npx prints notices (e.g. "new npm version available") on stderr; with "Stop" those would abort the release.
 $ErrorActionPreference = "Continue"
@@ -58,7 +62,7 @@ try {
     $ErrorActionPreference = "Stop"
 }
 $service = ($keys | Where-Object { $_.name -eq "service_role" }).api_key
-if (-not $service) { throw "Could not get an upload key - run 'npx supabase login' first" }
+if (-not $service) { throw "Could not get an upload key - run 'npx supabase login' or add ~/.buddy/supabase-token" }
 $headers = @{ Authorization = "Bearer $service"; apikey = $service; "x-upsert" = "true" }
 
 # curl copes with big files and flaky links better than Invoke-RestMethod (which gave "connection closed" on ~30 MB).

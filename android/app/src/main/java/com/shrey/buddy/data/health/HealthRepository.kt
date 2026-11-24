@@ -42,6 +42,17 @@ class HealthRepository(private val context: Context) {
             day to DaySteps(day, g.result[StepsRecord.COUNT_TOTAL] ?: 0L, g.result.dataOrigins.map { it.packageName })
         }
 
+    /** Steps (from every app, de-duplicated by Health Connect) in the last [minutes] minutes. */
+    suspend fun stepsInLast(minutes: Long): Long {
+        val end = java.time.Instant.now()
+        return client.aggregate(
+            androidx.health.connect.client.request.AggregateRequest(
+                setOf(StepsRecord.COUNT_TOTAL),
+                TimeRangeFilter.between(end.minusSeconds(minutes * 60), end),
+            ),
+        )[StepsRecord.COUNT_TOTAL] ?: 0L
+    }
+
     /** Steps in each hour of [day]. */
     suspend fun hourlySteps(day: LocalDate): List<Int> {
         val out = MutableList(24) { 0 }

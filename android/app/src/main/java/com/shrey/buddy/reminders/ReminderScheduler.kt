@@ -85,20 +85,30 @@ object ReminderScheduler {
 
         val upcoming = pending.filter { (_, at) -> at >= now - RING_GRACE_MS }
         val due = upcoming.firstOrNull { (_, at) -> at <= now + 1_000 }
+        // Wake-up needed before the next reminder (laptop head start, or a re-check after one was handled).
+        var wakeAt: Long? = null
         if (due != null && ReminderRinging.current.value == null) {
-            try {
-                ReminderRingService.ring(app, RingInfo.of(due.first))
-                markRung(app, due.first.id, due.second)
-            } catch (e: Exception) {
-                // Background refreshes (e.g. sync) may not start a foreground service — let the alarm ring it instead.
-                Log.w(TAG, "couldn't ring from here; handing off to the alarm", e)
-                ReminderRinging.set(null)
-                arm(app, now + 2_000)
-                return@withLock
+            when (val gate = LaptopFirst.gate(app, due.first, due.second, now)) {
+                is LaptopFirst.Gate.Wait -> wakeAt = gate.until
+                LaptopFirst.Gate.Handled -> {
+                    // Answered on the laptop: this time counts as rung here; look at the rest shortly.
+                    markRung(app, due.first.id, due.second)
+                    wakeAt = System.currentTimeMillis() + 1_500
+                }
+                LaptopFirst.Gate.Ring -> try {
+                    ReminderRingService.ring(app, RingInfo.of(due.first))
+                    markRung(app, due.first.id, due.second)
+                } catch (e: Exception) {
+                    // Background refreshes (e.g. sync) may not start a foreground service — let the alarm ring it instead.
+                    Log.w(TAG, "couldn't ring from here; handing off to the alarm", e)
+                    ReminderRinging.set(null)
+                    arm(app, now + 2_000)
+                    return@withLock
+                }
             }
         }
-        val next = upcoming.firstOrNull { (_, at) -> at > now + 1_000 }
-        arm(app, next?.second)
+        val next = upcoming.firstOrNull { (_, at) -> at > now + 1_000 }?.second
+        arm(app, listOfNotNull(next, wakeAt).minOrNull())
     }
 
     private fun arm(context: Context, at: Long?) {

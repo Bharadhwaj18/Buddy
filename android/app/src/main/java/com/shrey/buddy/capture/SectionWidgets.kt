@@ -191,10 +191,10 @@ class MoneyWidget : GlanceAppWidget() {
         val today = LocalDate.now()
         val month = YearMonth.now()
         val excluded = c.db.accountDao().all().filter { !it.includeInTotals }.map { it.id }.toSet()
-        val debits = c.db.transactionDao().all().filter { it.direction == "debit" && !it.isTransfer && it.accountId !in excluded }
+        val debits = c.db.transactionDao().all().filter { com.shrey.buddy.finance.MoneyBack.countsAsSpend(it) && it.accountId !in excluded }
         fun day(ms: Long) = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
-        val spentMonth = debits.filter { YearMonth.from(day(it.occurredAt)) == month }.sumOf { it.amountMinor }
-        val spentToday = debits.filter { day(it.occurredAt) == today }.sumOf { it.amountMinor }
+        val spentMonth = debits.filter { YearMonth.from(day(it.occurredAt)) == month }.let { com.shrey.buddy.finance.MoneyBack.net(it) }
+        val spentToday = debits.filter { day(it.occurredAt) == today }.let { com.shrey.buddy.finance.MoneyBack.net(it) }
         val recent = c.db.transactionDao().all().filter { !it.isTransfer }.sortedByDescending { it.occurredAt }.take(3)
         val inr = NumberFormat.getCurrencyInstance(Locale.Builder().setLanguage("en").setRegion("IN").build()).apply { maximumFractionDigits = 0 }
         provideContent {

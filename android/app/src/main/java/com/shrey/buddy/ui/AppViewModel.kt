@@ -65,8 +65,9 @@ class AppViewModel(private val c: AppContainer) : ViewModel() {
         c.finance.observeAccounts(),
         c.captures.observeParsed(),
         selectedAccount,
-    ) { txns, accounts, captures, selected ->
-        buildMoneyData(txns, accounts, captures, c.captures::decode, selected)
+        c.items.observe(com.shrey.buddy.data.items.Kinds.MONEY_BACK, com.shrey.buddy.data.items.MoneyBackLink.serializer()),
+    ) { txns, accounts, captures, selected, links ->
+        buildMoneyData(txns, accounts, captures, c.captures::decode, selected, moneyBackLinks = links.associate { it.data.creditId to it.data.debitId })
     }
         .flowOn(Dispatchers.Default)
         .state(MoneyData())
@@ -81,9 +82,24 @@ class AppViewModel(private val c: AppContainer) : ViewModel() {
     fun updateTransaction(
         t: com.shrey.buddy.ui.money.TxnItem, category: Category, sub: String?, isTransfer: Boolean, note: String?,
         fuel: com.shrey.buddy.finance.FuelEntry? = null,
+        /** Money in only: the payment this is money back for (null = not linked to one). */
+        moneyBackFor: String? = null,
     ) = viewModelScope.launch {
         c.finance.updateTransaction(t.id, Category.key(category, sub), isTransfer, note)
         if (category == Category.FUEL && !isTransfer && fuel != null) c.fuel.save(t.id, t.amountMinor, t.date, fuel) else c.fuel.clear(t.id)
+        if (t.isCredit) {
+            val linkId = com.shrey.buddy.data.items.ItemStore.stableId("moneyback:${t.id}")
+            val stillMoneyBack = !isTransfer && !category.isIncome && category != Category.TRANSFER
+            if (moneyBackFor != null && stillMoneyBack) {
+                c.items.put(
+                    com.shrey.buddy.data.items.Kinds.MONEY_BACK, com.shrey.buddy.data.items.MoneyBackLink(t.id, moneyBackFor),
+                    com.shrey.buddy.data.items.MoneyBackLink.serializer(), id = linkId,
+                )
+            } else if (t.backForId != null) {
+                c.items.delete(linkId)
+            }
+            runCatching { c.planning.checkBudgets() }
+        }
     }
 
     fun deleteTransaction(id: String, title: String) = viewModelScope.launch {
@@ -171,6 +187,8 @@ class AppViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     val unrecognisedCount = c.captures.observeCount(CaptureRepository.STATUS_UNRECOGNISED).state(0)
+    /** Bank messages no parser understood (shown so you can send them in for a parser update). */
+    val unrecognised = c.captures.observeUnrecognised().state(emptyList())
 
     private val _scan = MutableStateFlow<String?>(null)
     val scanStatus = _scan.asStateFlow()
@@ -341,7 +359,13 @@ class AppViewModel(private val c: AppContainer) : ViewModel() {
         _chat.value = _chat.value + ChatUiMessage("user", question)
         _chatBusy.value = true
         viewModelScope.launch {
-            // "spent 450 on lunch", "remind me…", "add task…", "note…": do it right here, no AI round trip.
+            // Lights ("lights off", "movie mode") and "spent 450 on lunch", "remind me…", "add task…", "note…": do it right here, no AI round trip.
+            val lightsDone = runCatching { com.shrey.buddy.voice.VoiceCommands.lights(c, question) }.getOrNull()
+            if (lightsDone != null) {
+                _chat.value = _chat.value + ChatUiMessage("model", "✓ $lightsDone", meta = "Done on your Wi-Fi · instant")
+                _chatBusy.value = false
+                return@launch
+            }
             val accounts = c.db.accountDao().all().filter { !it.archived }.map { it.name }
             val action = com.shrey.buddy.voice.VoiceIntent.parse(question, accounts)
                 ?.takeIf { it.explicit && it.kind != com.shrey.buddy.voice.VoiceIntent.Kind.QUESTION }
@@ -425,6 +449,7 @@ class AppViewModel(private val c: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
+            runCatching { c.captures.reparseAfterUpdate(com.shrey.buddy.BuildConfig.VERSION_CODE) }
             // Backfill: turns captures from before the finance core existed into transactions (idempotent).
             c.captures.materializeAll()
             c.tasks.ensureDefaults()

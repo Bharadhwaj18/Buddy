@@ -31,6 +31,8 @@ class StepWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             prefs.edit().putLong("healthSyncAt", now).putString("healthBackfilledOn", today).apply()
         }
         runCatching { Nudges.check(applicationContext) }
+        // Backup for "arriving home" light routines (and keeps "still home" fresh so Wi-Fi blips don't count).
+        runCatching { com.shrey.buddy.lights.Lights.checkHome(applicationContext) }
         runCatching { com.shrey.buddy.data.sync.DailyWorker.catchUp(applicationContext) }
         return Result.success()
     }

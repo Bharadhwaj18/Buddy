@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- WiZ lights on the home Wi-Fi (enforced from Android 17). -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <!-- Watch / scale data via Health Connect (Galaxy Fit 3 → Samsung Health, or any brand). -->
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
@@ -15,6 +18,7 @@
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
     <!-- Phone step sensor (counts steps with no watch). -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
@@ -202,6 +206,9 @@
             android:name=".health.RestTimerReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".lights.LightsReceiver"
+            android:exported="false" />
         <receiver
             android:name=".data.health.NudgeReceiver"
             android:exported="false" />

@@ -4,6 +4,8 @@ import com.shrey.buddy.data.db.TransactionEntity
 import com.shrey.buddy.data.items.Budget
 import com.shrey.buddy.data.items.Recurring
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.ZoneId
@@ -76,5 +78,28 @@ class PlanningTest {
         assertEquals(800_00L, s.first { it.budget.category == "food" }.spentMinor)
         assertEquals(800_00L, s.first { it.budget.category == "total" }.spentMinor)
         assertEquals(0.8f, s.first { it.budget.category == "food" }.fraction, 0.001f)
+    }
+
+    @Test fun `money back lowers the category's spending, not income`() {
+        val month = java.time.YearMonth.of(2026, 10)
+        val txns = listOf(
+            txn("1", LocalDate.of(2026, 10, 2), 900_00, "Dinner", category = "food/Eating out"),
+            // A friend paid ₹600 back for the dinner: filed under Food, so it's money back.
+            txn("2", LocalDate.of(2026, 10, 3), 600_00, "Rahul", direction = "credit", category = "food/Eating out"),
+            txn("3", LocalDate.of(2026, 10, 3), 200_00, "Uber", category = "transport"),
+            txn("4", LocalDate.of(2026, 10, 3), 5_000_00, "Salary", direction = "credit", category = "salary"),
+        )
+        assertTrue(MoneyBack.isMoneyBack(txns[1]))
+        assertFalse(MoneyBack.isMoneyBack(txns[3]))
+        assertFalse(MoneyBack.isIncome(txns[1]))
+        assertTrue(MoneyBack.isIncome(txns[3]))
+        val s = BudgetLogic.status(
+            listOf(Budget("food", 1_000_00), Budget("food/Eating out", 500_00), Budget("total", 5_000_00)), txns, emptySet(), month,
+        )
+        assertEquals(300_00L, s.first { it.budget.category == "food" }.spentMinor)
+        assertEquals(300_00L, s.first { it.budget.category == "food/Eating out" }.spentMinor)
+        assertEquals(500_00L, s.first { it.budget.category == "total" }.spentMinor)
+        // More back than spent never goes negative.
+        assertEquals(0L, MoneyBack.net(listOf(txn("5", LocalDate.of(2026, 10, 4), 100_00, "Refund", direction = "credit", category = "shopping"))))
     }
 }

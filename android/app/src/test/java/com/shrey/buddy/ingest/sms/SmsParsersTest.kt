@@ -34,15 +34,15 @@ class SmsParsersTest {
     @Test fun `IndusInd debit card purchase`() {
         val t = txn(
             indus,
-            "INR 2,297.06 debited from your A/C 999***991234 towards Debit Card Purchase. " +
-                "Avl BAL INR 1,74,874.34 - Not you? Call 18602677777 to report issue - IndusInd Bank",
+            "INR 1,111.50 debited from your A/C 999***991234 towards Debit Card Purchase. " +
+                "Avl BAL INR 1,23,456.78 - Not you? Call 18602677777 to report issue - IndusInd Bank",
         )
         assertEquals(Bank.INDUSIND, t.bank)
         assertEquals(Direction.DEBIT, t.direction)
-        assertEquals(229706L, t.amountMinor)
+        assertEquals(111150L, t.amountMinor)
         assertEquals("1234", t.accountLast4)
         assertEquals("Debit Card Purchase", t.channel)
-        assertEquals(17487434L, t.balanceMinor)
+        assertEquals(12345678L, t.balanceMinor)
     }
 
     @Test fun `IndusInd debit leaving a small balance`() {
@@ -61,6 +61,33 @@ class SmsParsersTest {
         assertEquals(50000L, t.amountMinor)
         assertEquals("SAOAO1000000000000000001", t.reference)
         assertEquals(50000L, t.balanceMinor)
+    }
+
+    @Test fun `IndusInd account debit for an IMPS charge`() {
+        val t = txn("JX-INDUSB-S", "IndusInd A/C **1234 Debited; INR 5.90 Ref-IMPS CHG 02-NOV-26 XXXXXXXX0001.Bal INR 1,234.56.Dispute-Call XXXXXXX7777-IndusInd Bank")
+        assertEquals(Direction.DEBIT, t.direction)
+        assertEquals(590L, t.amountMinor)
+        assertEquals("1234", t.accountLast4)
+        assertEquals("IMPS charges", t.counterparty)
+        assertEquals("Bank charge", t.channel)
+        assertEquals("2026-11-02", t.txnDate)
+        assertEquals(123456L, t.balanceMinor)
+    }
+
+    @Test fun `IndusInd IMPS charge is not mistaken for the transfer it belongs to`() {
+        val transfer = txn("JD-INDUSB-T", "INR 2000 debited from IndusInd Bank A/c XXXXXXX1234 to A PERSON on 02-11-2026. RRN XXXXXXXX0001. Not you? Call XXXXXXX7777")
+        val charge = txn("JX-INDUSB-S", "IndusInd A/C **1234 Debited; INR 5.90 Ref-IMPS CHG 02-NOV-26 XXXXXXXX0001.Bal INR 1,234.56.Dispute-Call XXXXXXX7777-IndusInd Bank")
+        assert(transfer.reference != charge.reference)
+    }
+
+    @Test fun `IndusInd transfer to a person`() {
+        val t = txn("JD-INDUSB-T", "INR 2000 debited from IndusInd Bank A/c XXXXXXX1234 to A PERSON on 02-11-2026. RRN XXXXXXXX0001. Not you? Call XXXXXXX7777")
+        assertEquals(Direction.DEBIT, t.direction)
+        assertEquals(200000L, t.amountMinor)
+        assertEquals("1234", t.accountLast4)
+        assertEquals("A PERSON", t.counterparty)
+        assertEquals("IMPS", t.channel)
+        assertEquals("2026-11-02", t.txnDate)
     }
 
     @Test fun `IndusInd informational messages are not transactions`() {
@@ -84,17 +111,17 @@ class SmsParsersTest {
     @Test fun `SBI UPI debit to a person`() {
         val t = txn(
             sbi,
-            "Dear UPI user A/C X1234 debited by 80000.00 on date 07Jun26 trf to A Person Refno 600000000001 " +
+            "Dear UPI user A/C X1234 debited by 45000.00 on date 15Mar26 trf to A Person Refno 600000000001 " +
                 "If not u? call-1800111109 for other services-18001234-SBI",
         )
         assertEquals(Bank.SBI, t.bank)
         assertEquals(Direction.DEBIT, t.direction)
-        assertEquals(8000000L, t.amountMinor)
+        assertEquals(4500000L, t.amountMinor)
         assertEquals("1234", t.accountLast4)
         assertEquals("A Person", t.counterparty)
         assertEquals("UPI", t.channel)
         assertEquals("600000000001", t.reference)
-        assertEquals("2026-06-07", t.txnDate)
+        assertEquals("2026-03-15", t.txnDate)
         assertNull(t.balanceMinor)
     }
 
@@ -377,7 +404,7 @@ class SmsParsersTest {
     }
 
     @Test fun `amount parsing`() {
-        assertEquals(17487434L, parseMinor("1,74,874.34"))
+        assertEquals(12345678L, parseMinor("1,23,456.78"))
         assertEquals(40700L, parseMinor("407"))
         assertEquals(50L, parseMinor("0.5"))
     }

@@ -63,13 +63,14 @@ object AiContext {
         val excluded = accounts.filter { !it.includeInTotals }.map { it.id }.toSet()
         val txns = c.db.transactionDao().all().filter { it.deletedAt == null }
         val counted = txns.filter { !it.isTransfer && it.accountId !in excluded }
-        val debits = counted.filter { it.direction == "debit" }
+        // Spending = payments minus money back (MoneyBack): ₹900 dinner, ₹600 paid back → ₹300.
+        val debits = counted.filter { com.shrey.buddy.finance.MoneyBack.countsAsSpend(it) }
         val month = YearMonth.from(today)
         val lastMonth = month.minusMonths(1)
         val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        fun sum(list: List<com.shrey.buddy.data.db.TransactionEntity>) = list.sumOf { it.amountMinor }
+        fun sum(list: List<com.shrey.buddy.data.db.TransactionEntity>) = com.shrey.buddy.finance.MoneyBack.net(list)
         val monthDebits = debits.filter { YearMonth.from(day(it.occurredAt)) == month }
-        val categories = monthDebits.groupBy { Category.of(it.category).label }.mapValues { sum(it.value) }.entries.sortedByDescending { it.value }
+        val categories = monthDebits.groupBy { Category.of(it.category).label }.mapValues { sum(it.value) }.entries.filter { it.value > 0 }.sortedByDescending { it.value }
             .take(8).map { it.key to it.value }
         val balances = accounts.mapNotNull { a ->
             currentBalance(a, txns.filter { it.accountId == a.id }).first?.let { safeAccountName(a.name) to it }
@@ -99,7 +100,7 @@ object AiContext {
             spentMonth = sum(monthDebits),
             spentLastMonth = sum(debits.filter { YearMonth.from(day(it.occurredAt)) == lastMonth }),
             spentLastMonthSamePoint = sum(debits.filter { val d = day(it.occurredAt); YearMonth.from(d) == lastMonth && d.dayOfMonth <= today.dayOfMonth }),
-            incomeMonth = sum(counted.filter { it.direction == "credit" && YearMonth.from(day(it.occurredAt)) == month }),
+            incomeMonth = counted.filter { com.shrey.buddy.finance.MoneyBack.isIncome(it) && YearMonth.from(day(it.occurredAt)) == month }.sumOf { it.amountMinor },
             topCategoriesMonth = categories,
             accounts = balances,
             budgets = budgets,

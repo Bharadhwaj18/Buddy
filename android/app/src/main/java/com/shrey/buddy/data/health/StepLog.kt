@@ -61,17 +61,44 @@ class StepLog(
         val value = readCounter() ?: return
         val last = prefs.getFloat("lastCounter", -1f)
         prefs.edit().putFloat("lastCounter", value).apply()
+        if (!prefs.contains("sampledSince")) prefs.edit().putLong("sampledSince", System.currentTimeMillis()).apply()
         if (last < 0f) return // first reading: nothing to attribute yet
         val delta = if (value >= last) value - last else value // the counter resets on reboot
         // Ignore impossible jumps (e.g. a sensor glitch) — more than ~30k steps in one sample.
         if (delta <= 0f || delta > 30_000f) return
-        if (delta >= 40f) Nudges.movedNow(context)
+        rememberRecent(delta.toLong())
         val day = now.toLocalDate()
         val key = "phone:$day"
         prefs.edit()
             .putLong(key, prefs.getLong(key, 0L) + delta.toLong())
             .putLong("$key:${now.hour}", prefs.getLong("$key:${now.hour}", 0L) + delta.toLong())
             .apply()
+    }
+
+    /** Recent phone samples as "time:steps;…", kept for two hours (for the move nudge). */
+    private fun rememberRecent(steps: Long) {
+        val now = System.currentTimeMillis()
+        val kept = recentSamples().filter { now - it.first < 2 * 60 * 60_000 } + (now to steps)
+        prefs.edit().putString("recent", kept.joinToString(";") { "${it.first}:${it.second}" }).apply()
+    }
+
+    private fun recentSamples(): List<Pair<Long, Long>> =
+        prefs.getString("recent", "").orEmpty().split(';').mapNotNull { s ->
+            val (t, n) = s.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+            (t.toLongOrNull() ?: return@mapNotNull null) to (n.toLongOrNull() ?: return@mapNotNull null)
+        }
+
+    /**
+     * Steps the phone counted in roughly the last hour, or null when it hasn't been sampling that
+     * long (so we can't tell yet). The sensor is read every ~15 min, so each sample covers the time
+     * since the one before it.
+     */
+    fun phoneStepsLastHour(): Long? {
+        if (!hasSensorPermission()) return null
+        val now = System.currentTimeMillis()
+        val since = prefs.getLong("sampledSince", 0L)
+        if (since == 0L || now - since < 60 * 60_000) return null
+        return recentSamples().filter { now - it.first <= 60 * 60_000 }.sumOf { it.second }
     }
 
     private suspend fun readCounter(): Float? {

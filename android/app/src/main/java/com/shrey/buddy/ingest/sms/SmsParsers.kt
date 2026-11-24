@@ -78,7 +78,7 @@ object SmsParsers {
 internal const val AMOUNT = """([\d,]+(?:\.\d{1,2})?)"""
 internal const val VPA = """([\w.\-]+@[A-Za-z0-9]+)"""
 
-/** "2,297.06" -> 229706 paise. */
+/** "1,111.50" -> 111150 paise. */
 internal fun parseMinor(amount: String): Long =
     BigDecimal(amount.replace(",", "")).movePointRight(2).setScale(0, RoundingMode.HALF_UP).longValueExact()
 
@@ -89,7 +89,7 @@ private val honorific = Regex("^(Mr|Mrs|Ms|Miss|Dr)\\.?\\s+", RegexOption.IGNORE
 internal fun cleanParty(raw: String): String = raw.trim().replace(honorific, "").trim()
 
 private val dateFormats: List<DateTimeFormatter> =
-    listOf("ddMMMyy", "d/M/yy", "d/M/yyyy", "d-M-yy", "d-M-yyyy", "yyyy-MM-dd").map {
+    listOf("ddMMMyy", "d/M/yy", "d/M/yyyy", "d-M-yy", "d-M-yyyy", "d-MMM-yy", "yyyy-MM-dd").map {
         DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(it).toFormatter(Locale.ENGLISH)
     }
 
@@ -111,11 +111,18 @@ internal object IndusIndParser {
     // A/C *XX1234 credited by Rs 1000.00 from someone@okaxis. RRN:100000000002. Avl Bal:5678.50. Not you? ...
     private val upiCredit = rx("""A/c \*?X*(\d{3,6}) credited by Rs\.?\s?$AMOUNT from (\S+?)\.\s?RRN:\s?(\d+)(?:\.\s?Avl Bal:\s?$AMOUNT)?""")
 
-    // INR 2,297.06 debited from your A/C 999***991234 towards Debit Card Purchase. Avl BAL INR 12,345.67 - Not you? ...
+    // INR 1,111.50 debited from your A/C 999***991234 towards Debit Card Purchase. Avl BAL INR 12,345.67 - Not you? ...
     private val cardDebit = rx("""INR\s?$AMOUNT debited from your A/C (\S+) towards (.+?)\.\s?Avl BAL INR\s?$AMOUNT""")
 
     // IndusInd A/C Credited; INR 500.00 Ref-SAOAO1000000000000000001.Bal INR 500.00.Dispute-Call ...
-    private val accountCredit = rx("""IndusInd A/C Credited;\s?INR\s?$AMOUNT Ref-(\S+?)\.\s?Bal INR\s?$AMOUNT""")
+    // IndusInd A/C **1234 Debited; INR 5.90 Ref-IMPS CHG 02-NOV-26 XXXXXXXX0001.Bal INR 1,000.00.Dispute-Call ...
+    private val accountEntry = rx("""IndusInd A/C(?: \*{0,2}X*(\d{3,6}))? (Credited|Debited);\s?INR\s?$AMOUNT Ref-(.+?)\.\s?Bal INR\s?$AMOUNT""")
+
+    // "IMPS CHG 02-NOV-26 XXXXXXXX0001": a bank fee for the transfer with that reference.
+    private val chargeRef = rx("""^(\w+) CHG\s+(\d{1,2}-[A-Za-z]{3}-\d{2})\s*(\S*)""")
+
+    // INR 2000 debited from IndusInd Bank A/c XXXXXXX1234 to A PERSON on 02-11-2026. RRN XXXXXXXX0001. Not you? Call ...
+    private val transferTo = rx("""INR\s?$AMOUNT debited from IndusInd Bank A/c X*(\d{3,6}) to (.+?) on ([\d-]+)\.\s?RRN\s?(\S+?)\.(?:\s|$)""")
 
     // Your account XXXXXXX1234 debited with Rs. 20000 on 02-07-26 and account XXXXXXX9999/K PERSON will be credited.(IMPS Ref no. 600000000004)
     private val impsDebit = rx(
@@ -163,9 +170,22 @@ internal object IndusIndParser {
             val (amount, account, channel, balance) = m.destructured
             return debit(amount, account, channel = channel.trim(), balance = balance)
         }
-        accountCredit.find(text)?.let { m ->
-            val (amount, ref, balance) = m.destructured
-            return debit(amount, null, reference = ref, balance = balance).copy(direction = Direction.CREDIT)
+        accountEntry.find(text)?.let { m ->
+            val (account, kind, amount, ref, balance) = m.destructured
+            val direction = if (kind.equals("Debited", ignoreCase = true)) Direction.DEBIT else Direction.CREDIT
+            chargeRef.find(ref.trim())?.let { c ->
+                val (what, date, ofRef) = c.destructured
+                return debit(amount, account.ifEmpty { null }, counterparty = "${what.uppercase()} charges", channel = "Bank charge",
+                    // Prefixed: the fee repeats the transfer's reference, and must not be merged into it.
+                    reference = "CHG:${ofRef.ifEmpty { date }}", balance = balance, date = date).copy(direction = direction)
+            }
+            return debit(amount, account.ifEmpty { null }, reference = ref.trim(), balance = balance).copy(direction = direction)
+        }
+        transferTo.find(text)?.let { m ->
+            val (amount, account, payee, date, rrn) = m.destructured
+            // The bank masks the RRN to its last 4 digits, so add the date to keep different transfers apart.
+            val ref = if (rrn.any { it == 'X' || it == 'x' }) "$date/$rrn" else rrn
+            return debit(amount, account, counterparty = cleanParty(payee), channel = "IMPS", reference = ref, date = date)
         }
         impsDebit.find(text)?.let { m ->
             val (account, amount, date, payee, ref) = m.destructured

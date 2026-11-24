@@ -24,6 +24,7 @@ object VoiceCommands {
     private fun LocalDateTime.millis() = atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     suspend fun handle(c: AppContainer, transcript: String): String {
+        lights(c, transcript)?.let { return it }
         val accounts = c.db.accountDao().all().filter { !it.archived }.map { it.name }
         // Keywords first ("spent…", "remind me…", "add task…", "note…") — instant and offline. Gemini only when unsure.
         VoiceIntent.parse(transcript, accounts)?.let { return perform(c, it, transcript) }
@@ -89,6 +90,21 @@ object VoiceCommands {
     }
 
     /** Applies something [VoiceIntent] understood; returns the confirmation line. */
+    /** "Lights off", "dim the bedroom", "movie mode": done on the home Wi-Fi, no AI. Null when it isn't about lights. */
+    suspend fun lights(c: AppContainer, transcript: String): String? {
+        val lights = com.shrey.buddy.lights.Lights.lights(c.context)
+        val routines = com.shrey.buddy.lights.Lights.routines(c.context)
+        if (lights.isEmpty() && routines.isEmpty()) return null
+        val cmd = com.shrey.buddy.lights.LightVoice.parse(
+            transcript, lights.map { it.data.room }.filter { it.isNotBlank() }.distinct(), routines.map { it.data.name }.filter { it.isNotBlank() },
+        ) ?: return null
+        return when (cmd) {
+            is com.shrey.buddy.lights.LightVoice.Command.Set -> com.shrey.buddy.lights.Lights.apply(c.context, cmd.action)
+            is com.shrey.buddy.lights.LightVoice.Command.Routine ->
+                routines.first { it.data.name == cmd.name }.let { com.shrey.buddy.lights.Lights.run(c.context, it.data) }
+        }
+    }
+
     suspend fun perform(c: AppContainer, r: VoiceIntent.Result, transcript: String): String = when (r.kind) {
         VoiceIntent.Kind.EXPENSE, VoiceIntent.Kind.INCOME -> {
             val credit = r.kind == VoiceIntent.Kind.INCOME

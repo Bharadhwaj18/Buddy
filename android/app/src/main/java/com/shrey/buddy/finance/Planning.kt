@@ -107,12 +107,13 @@ object BudgetLogic {
         month: YearMonth = YearMonth.now(),
         zone: ZoneId = ZoneId.systemDefault(),
     ): List<BudgetStatus> {
+        // Payments minus money back (see MoneyBack): ₹900 dinner with ₹600 paid back counts as ₹300.
         val spend = txns.filter {
-            it.deletedAt == null && it.direction == "debit" && !it.isTransfer && it.accountId !in excludedAccounts &&
+            it.deletedAt == null && MoneyBack.countsAsSpend(it) && it.accountId !in excludedAccounts &&
                 YearMonth.from(Instant.ofEpochMilli(it.occurredAt).atZone(zone)) == month
         }
         return budgets.map { b ->
-            BudgetStatus(b, if (b.category == "total") spend.sumOf { it.amountMinor } else spend.filter { Cat.matches(it.category, b.category) }.sumOf { it.amountMinor })
+            BudgetStatus(b, if (b.category == "total") MoneyBack.net(spend) else MoneyBack.net(spend.filter { Cat.matches(it.category, b.category) }))
         }.sortedWith(compareByDescending<BudgetStatus> { it.budget.category == "total" }.thenByDescending { it.fraction })
     }
 }

@@ -290,5 +290,13 @@ class HealthViewModel(private val c: AppContainer) : ViewModel() {
         items.put(Kinds.WORKOUT, item.data.copy(title = title), Workout.serializer(), id = item.id)
     }
 
+    /** A watch run's GPS route, allowed one-off from Health Connect: fills in map, splits and charts. */
+    fun attachRoute(item: Item<Workout>, route: androidx.health.connect.client.records.ExerciseRoute) = viewModelScope.launch {
+        val run = item.data.run ?: return@launch
+        val start = java.time.Instant.ofEpochMilli(run.startedAt.takeIf { it > 0 } ?: item.data.startedAt)
+        val full = com.shrey.buddy.data.health.HealthSync.runFromRoute(run, start, route.route)
+        items.put(Kinds.WORKOUT, item.data.copy(run = full), Workout.serializer(), id = item.id)
+    }
+
     fun discardRun() = RunTrackerService.reset()
 }

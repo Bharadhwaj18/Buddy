@@ -37,6 +37,9 @@ class ItemStore(
     suspend fun <T> get(id: String, serializer: KSerializer<T>): Item<T>? =
         db.itemDao().get(id)?.takeIf { it.deletedAt == null }?.let { decode(it, serializer) }
 
+    /** True when this id exists but was deleted (so syncs don't bring it back). */
+    suspend fun isDeleted(id: String): Boolean = db.itemDao().get(id)?.deletedAt != null
+
     fun <T> decode(row: ItemEntity, serializer: KSerializer<T>): Item<T>? =
         runCatching { Item(row, json.decodeFromString(serializer, row.dataJson)) }.getOrNull()
 
