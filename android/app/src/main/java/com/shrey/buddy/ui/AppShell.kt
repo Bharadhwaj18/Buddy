@@ -115,6 +115,9 @@ fun AppShell(vm: AppViewModel, startAt: String? = null) {
             "insights" -> nav.navigate(LifeRoute(LifeModule.INSIGHTS.name))
             "lights" -> nav.navigate(LifeRoute(LifeModule.LIGHTS.name))
             "music" -> nav.navigate(LifeRoute(LifeModule.MUSIC.name))
+            "splits" -> nav.navigate(LifeRoute(LifeModule.SPLITS.name))
+            "parcels" -> nav.navigate(LifeRoute(LifeModule.PARCELS.name))
+            "recurring" -> nav.navigate(LifeRoute(LifeModule.RECURRING.name))
             else -> if (startAt?.startsWith("txn:") == true) {
                 nav.switchTab(MoneyRoute)
                 vm.openTransaction(startAt.removePrefix("txn:"))

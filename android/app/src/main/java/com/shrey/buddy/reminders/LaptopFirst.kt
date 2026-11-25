@@ -67,7 +67,7 @@ object LaptopFirst {
         }
     }
 
-    private suspend fun laptopSeenRecently(context: Context, now: Long): Boolean {
+    internal suspend fun laptopSeenRecently(context: Context, now: Long): Boolean {
         val row = supabase(context).from("devices").select {
             filter { eq("kind", "laptop") }
             order("last_seen", Order.DESCENDING)

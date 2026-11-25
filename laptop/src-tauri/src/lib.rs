@@ -181,6 +181,7 @@ pub fn run() {
             // A second launch just brings up the main window.
             let _ = show_focused(app, "main");
         }))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

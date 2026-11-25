@@ -117,6 +117,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .chip.late { background: var(--late-soft); color: var(--late); }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.parcel { background: var(--accent-soft, rgba(198,244,50,0.14)); color: var(--accent-text); }
 
 .check {
   width: 19px;
@@ -442,3 +443,6 @@ select.field, input.field {
 .signin p { margin: 0; color: var(--dim); font-size: 13px; }
 .signin input.field { width: 100%; padding: 12px 14px; }
 .signin .error { color: var(--late); font-size: 12px; }
+
+/* One-time code from the phone */
+.ring.otp .otp-code { font-size: 30px; font-weight: 700; letter-spacing: 6px; margin-top: 6px; font-variant-numeric: tabular-nums; user-select: all; }

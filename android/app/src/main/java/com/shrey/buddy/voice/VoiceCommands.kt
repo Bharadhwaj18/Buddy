@@ -25,6 +25,7 @@ object VoiceCommands {
 
     suspend fun handle(c: AppContainer, transcript: String): String {
         lights(c, transcript)?.let { return it }
+        splits(c, transcript)?.let { return it }
         val accounts = c.db.accountDao().all().filter { !it.archived }.map { it.name }
         // Keywords first ("spent…", "remind me…", "add task…", "note…") — instant and offline. Gemini only when unsure.
         VoiceIntent.parse(transcript, accounts)?.let { return perform(c, it, transcript) }
@@ -90,6 +91,18 @@ object VoiceCommands {
     }
 
     /** Applies something [VoiceIntent] understood; returns the confirmation line. */
+    /** "Split 1200 with Ravi and Amit for dinner", "Neha owes me 350": no AI. Null when it isn't a split. */
+    suspend fun splits(c: AppContainer, transcript: String): String? {
+        val d = com.shrey.buddy.finance.Splits.parse(transcript) ?: return null
+        if (d.people.isEmpty()) return null
+        com.shrey.buddy.helpers.SplitKeeper.add(c, d)
+        val each = com.shrey.buddy.finance.Splits.ious(d, 0).first().amountMinor
+        return when {
+            !d.theyOwe -> "Noted: you owe ${d.people.joinToString()} ${com.shrey.buddy.ui.inr(each)}"
+            else -> "Noted: ${d.people.joinToString()} owe${if (d.people.size == 1) "s" else ""} you ${com.shrey.buddy.ui.inr(each)}" + if (d.people.size > 1) " each" else ""
+        }
+    }
+
     /** "Lights off", "dim the bedroom", "movie mode": done on the home Wi-Fi, no AI. Null when it isn't about lights. */
     suspend fun lights(c: AppContainer, transcript: String): String? {
         val lights = com.shrey.buddy.lights.Lights.lights(c.context)

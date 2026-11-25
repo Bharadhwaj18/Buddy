@@ -178,3 +178,66 @@ export async function buddyAi<T>(body: Record<string, unknown>): Promise<T> {
   if (error) throw error;
   return data as T;
 }
+
+// ---------------------------------------------------------------- OTPs from the phone
+
+export interface Otp {
+  id: string;
+  code: string;
+  source: string | null;
+  created_at: string;
+}
+
+/** Codes the phone sent in the last few minutes (older ones are useless, and the server clears them). */
+export async function freshOtps(): Promise<Otp[]> {
+  const since = new Date(Date.now() - 3 * 60_000).toISOString();
+  const { data, error } = await supabase.from("otp_relay").select("*").gte("created_at", since).order("created_at");
+  if (error) throw error;
+  return (data ?? []) as Otp[];
+}
+
+export async function deleteOtp(id: string): Promise<void> {
+  await supabase.from("otp_relay").delete().eq("id", id);
+}
+
+/** Calls [onNew] the moment the phone sends a code (Supabase Realtime). */
+export function watchOtps(onNew: () => void): void {
+  supabase
+    .channel("otp-relay")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "otp_relay" }, () => onNew())
+    .subscribe();
+}
+
+// ---------------------------------------------------------------- parcels (read from items)
+
+export interface ParcelInfo {
+  id: string;
+  merchant: string;
+  title: string | null;
+  status: string;
+  eta: string | null;
+  deliveryCode: string | null;
+}
+
+/** Deliveries still on the way (the phone reads them from shop / courier SMS). */
+export async function activeParcels(): Promise<ParcelInfo[]> {
+  const { data, error } = await supabase
+    .from("items")
+    .select("id,data")
+    .eq("kind", "parcel")
+    .is("deleted_at", null)
+    .order("updated_at", { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  return (data ?? [])
+    .map((r): Record<string, unknown> & { id: string } => ({ ...(r.data as Record<string, unknown>), id: r.id as string }))
+    .filter((p) => !p.hidden && p.status !== "DELIVERED" && p.status !== "CANCELLED")
+    .map((p) => ({
+      id: p.id,
+      merchant: String(p.merchant ?? ""),
+      title: (p.title as string | null) ?? null,
+      status: String(p.status ?? "ORDERED"),
+      eta: (p.eta as string | null) ?? null,
+      deliveryCode: (p.deliveryCode as string | null) ?? null,
+    }));
+}

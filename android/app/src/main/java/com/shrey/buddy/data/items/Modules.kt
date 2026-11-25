@@ -44,6 +44,10 @@ object Kinds {
     const val LIGHT_ROUTINE = "light_routine"
     /** A hummed / sung tune in the Music idea vault. */
     const val HUM = "hum"
+    /** Someone owes you (or you owe them) for a split. */
+    const val IOU = "iou"
+    /** A delivery tracked from shop / courier SMS. */
+    const val PARCEL = "parcel"
 }
 
 // ---- Health ----
@@ -519,4 +523,42 @@ data class Hum(
     /** Where in the recording the first note starts (notes are stored from 0). */
     val audioOffsetMs: Int = 0,
     val createdAt: Long = 0,
+)
+
+// ---- Splits ----
+
+/**
+ * One person's share. [theyOwe] = they owe you (you paid); false = you owe them. [txnId] is the payment it came
+ * from, if any; [settledTxnId] the money that paid it back (found automatically in bank SMS, or picked).
+ */
+@Serializable
+data class Iou(
+    val person: String = "",
+    val amountMinor: Long = 0,
+    val theyOwe: Boolean = true,
+    val note: String = "",
+    val txnId: String? = null,
+    val createdAt: Long = 0,
+    val settledAt: Long? = null,
+    val settledTxnId: String? = null,
+    val lastNudgeAt: Long? = null,
+)
+
+// ---- Parcels ----
+
+@Serializable
+data class Parcel(
+    val merchant: String = "",
+    val title: String? = null,
+    val orderId: String? = null,
+    /** ParcelStatus name. */
+    val status: String = "ORDERED",
+    /** ISO date it should arrive. */
+    val eta: String? = null,
+    /** Code to give the delivery person. */
+    val deliveryCode: String? = null,
+    val firstSeen: Long = 0,
+    val updatedAt: Long = 0,
+    /** Hidden from the lists (you said you got it, or it's old). */
+    val hidden: Boolean = false,
 )

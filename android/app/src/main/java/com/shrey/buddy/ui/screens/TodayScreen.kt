@@ -104,6 +104,8 @@ fun TodayScreen(
 
         item { UpdateCard(vm, compact = true) }
 
+        item { com.shrey.buddy.ui.life.TodayHelpers(lvm, onOpenModule) }
+
         if (briefing != null) {
             item {
                 BuddyCard(Modifier.fillMaxWidth(), color = BuddyColors.Voice.copy(alpha = 0.12f), onClick = { onOpenModule(LifeModule.INSIGHTS) }) {

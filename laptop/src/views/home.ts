@@ -13,7 +13,7 @@ import { escapeHtml, greeting, timeOf, whenText } from "../lib/format";
 type Tab = "today" | "upcoming" | "settings";
 
 export function mountHome(root: HTMLElement): void {
-  let state: EngineState = { tasks: [], rings: [], online: true, signedIn: false, email: null, queued: 0 };
+  let state: EngineState = { tasks: [], rings: [], otps: [], parcels: [], online: true, signedIn: false, email: null, queued: 0 };
   let tab: Tab = "today";
   let email: string | null = null;
   let signInError = "";

@@ -69,6 +69,11 @@ class DailyWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
                 runCatching { c.planning.refreshHoldings(force = true) }
                 runCatching { c.planning.runAutoLog() }
                 runCatching { c.planning.checkBudgets() }
+                if (kind == "daily") {
+                    runCatching { com.shrey.buddy.helpers.BillWatch.morning(c) }
+                    runCatching { com.shrey.buddy.helpers.SplitKeeper.nudge(c) }
+                    runCatching { com.shrey.buddy.helpers.ParcelTracker.tidy(c) }
+                }
                 val reminders = if (kind == "daily") {
                     buildReminders(
                         c.items.all(Kinds.PERSON, Person.serializer()), c.items.all(Kinds.DOCUMENT, Document.serializer()),

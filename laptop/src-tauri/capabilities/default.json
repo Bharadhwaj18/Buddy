@@ -17,6 +17,7 @@
     "core:window:allow-set-always-on-top",
     "global-shortcut:default",
     "autostart:default",
-    "core:event:default"
+    "core:event:default",
+    "clipboard-manager:allow-write-text"
   ]
 }

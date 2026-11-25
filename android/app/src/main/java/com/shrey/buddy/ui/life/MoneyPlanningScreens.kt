@@ -251,6 +251,9 @@ fun RecurringScreen(lvm: LifeViewModel, onBack: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     val today = LocalDate.now()
     val active = list.filter { it.data.active }
+    val radar by lvm.radar.collectAsStateWithLifecycle()
+    val stopped by lvm.stoppedBills.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(list.size, txns.size) { lvm.scanBills() }
 
     ModuleScaffold(LifeModule.RECURRING, lvm, onBack, onAdd = { adding = true }) {
         item {
@@ -265,6 +268,7 @@ fun RecurringScreen(lvm: LifeViewModel, onBack: () -> Unit) {
                 )
             }
         }
+        radarItems(lvm, radar, stopped)
         if (list.isEmpty()) item { EmptyNote("Add rent, SIPs, EMIs, subscriptions, salary…") }
         items(list.sortedBy { r -> RecurringLogic.occurrences(r.data, emptyList(), today, back = 0, ahead = 400).firstOrNull()?.date ?: LocalDate.MAX }, key = { it.id }) { item ->
             val r = item.data

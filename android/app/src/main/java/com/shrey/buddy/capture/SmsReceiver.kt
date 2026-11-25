@@ -7,6 +7,9 @@ import android.provider.Telephony
 import android.util.Log
 import com.shrey.buddy.BuddyApp
 import com.shrey.buddy.data.capture.IngestResult
+import com.shrey.buddy.helpers.OtpRelay
+import com.shrey.buddy.helpers.ParcelTracker
+import com.shrey.buddy.helpers.SplitKeeper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,10 +29,17 @@ class SmsReceiver : BroadcastReceiver() {
         scope.launch {
             try {
                 bySender.forEach { (sender, body) ->
-                    val result = app.container.captures.ingestSms(sender, body, System.currentTimeMillis(), via = "live")
+                    val c = app.container
+                    val now = System.currentTimeMillis()
+                    // One-time codes go to the laptop first: they're the time-critical bit.
+                    runCatching { OtpRelay.onSms(c, sender, body) }
+                    runCatching { ParcelTracker.onSms(c, sender, body, now) }
+                    val result = c.captures.ingestSms(sender, body, now, via = "live")
                     if (result is IngestResult.Stored) {
                         CaptureNotifier.notify(context, result.parse, result.transactionId)
-                        runCatching { app.container.planning.checkBudgets() }
+                        runCatching { c.planning.checkBudgets() }
+                        // Money in: maybe a friend paying back a split.
+                        result.transactionId?.let { id -> runCatching { SplitKeeper.onCredit(c, id) } }
                     }
                 }
             } catch (e: Exception) {

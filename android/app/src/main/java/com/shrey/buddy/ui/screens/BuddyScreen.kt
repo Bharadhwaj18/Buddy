@@ -243,6 +243,7 @@ fun BuddyScreen(
         item { com.shrey.buddy.capture.WidgetGalleryCard() }
 
         item { SectionHeader("Settings") }
+        item { com.shrey.buddy.ui.life.OtpSettingCard() }
         item {
             BuddyCard(Modifier.fillMaxWidth(), contentPadding = 12.dp, onClick = onOpenAccounts) {
                 ListRow(Icons.Rounded.AccountBalance, BuddyColors.Lime, "Bank accounts", "Rename, primary, totals, your UPI IDs", Modifier.padding(horizontal = 8.dp))

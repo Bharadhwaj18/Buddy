@@ -24,6 +24,8 @@ import com.shrey.buddy.ui.AppViewModel
 import com.shrey.buddy.ui.LoginScreen
 import com.shrey.buddy.ui.theme.BuddyTheme
 import io.github.jan.supabase.auth.auth
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import io.github.jan.supabase.auth.status.SessionStatus
 
 class MainActivity : ComponentActivity() {
@@ -63,6 +65,7 @@ class MainActivity : ComponentActivity() {
         // An update or reboot stops Hey Buddy; switch it back on as soon as Buddy is open.
         com.shrey.buddy.voice.BuddyVoiceService.restoreIfWanted(this)
         runCatching { com.shrey.buddy.data.sync.DailyWorker.catchUp(this) }
+        lifecycleScope.launch { runCatching { com.shrey.buddy.helpers.ParcelTracker.backfillOnce((application as BuddyApp).container) } }
     }
 
     companion object {

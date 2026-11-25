@@ -42,6 +42,8 @@ fun LifeModuleScreen(module: LifeModule, lvm: LifeViewModel, vm: AppViewModel, o
         LifeModule.VEHICLES -> VehiclesScreen(lvm, onBack)
         LifeModule.LIGHTS -> LightsScreen(lvm, onBack)
         LifeModule.MUSIC -> MusicScreen(lvm, onBack)
+        LifeModule.SPLITS -> SplitsScreen(lvm, onBack)
+        LifeModule.PARCELS -> ParcelsScreen(lvm, onBack)
         LifeModule.WISHLIST -> WishlistScreen(lvm, onBack)
         LifeModule.VAULT -> VaultScreen(lvm, onBack)
         LifeModule.NET_WORTH -> NetWorthScreen(lvm, vm, onBack)

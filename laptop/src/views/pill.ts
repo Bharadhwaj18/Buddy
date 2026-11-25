@@ -17,7 +17,7 @@ const DRAG_START_PX = 4;
 
 export function mountPill(root: HTMLElement): void {
   const win: TauriWindow = getCurrentWindow();
-  let state: EngineState = { tasks: [], rings: [], online: true, signedIn: false, email: null, queued: 0 };
+  let state: EngineState = { tasks: [], rings: [], otps: [], parcels: [], online: true, signedIn: false, email: null, queued: 0 };
   let open = false;
   let placing = false;
   let closeTimer: number | undefined;
@@ -32,6 +32,7 @@ export function mountPill(root: HTMLElement): void {
         <span class="dot"></span>
         <span class="label"></span>
         <span class="chip late" hidden></span>
+        <span class="chip parcel" hidden></span>
         <span class="next"></span>
       </div>
       <div class="panel"></div>
@@ -147,9 +148,15 @@ export function mountPill(root: HTMLElement): void {
     const lateChip = root.querySelector<HTMLElement>(".chip.late")!;
     lateChip.hidden = a.late === 0;
     lateChip.textContent = `${a.late} late`;
+    const today = new Date().toLocaleDateString("en-CA");
+    const arriving = state.parcels.filter((p) => p.status === "OUT_FOR_DELIVERY" || p.eta === today);
+    const parcelChip = root.querySelector<HTMLElement>(".chip.parcel")!;
+    parcelChip.hidden = arriving.length === 0;
+    parcelChip.textContent = `📦 ${arriving.length}`;
+    parcelChip.title = arriving.map((p) => `${p.title ?? p.merchant} arriving today`).join(", ");
     const next = root.querySelector<HTMLElement>(".next")!;
     next.textContent = a.next ? `Next · ${a.next.title} ${timeOf(a.next.remindAt!)}` : "";
-    panel.innerHTML = panelHtml(a);
+    panel.innerHTML = panelHtml(a, state.parcels);
     // The text changed, so the pill may be wider or narrower: fit the window to it.
     if (!open) void place(false);
   }
@@ -163,7 +170,29 @@ export function mountPill(root: HTMLElement): void {
   void place(false);
 }
 
-function panelHtml(a: Agenda): string {
+function parcelsHtml(parcels: EngineState["parcels"]): string {
+  if (parcels.length === 0) return "";
+  const today = new Date();
+  const iso = (d: Date) => d.toLocaleDateString("en-CA");
+  const tomorrow = new Date(today.getTime() + 86_400_000);
+  const when = (p: EngineState["parcels"][number]) =>
+    p.status === "OUT_FOR_DELIVERY" || p.eta === iso(today)
+      ? "today"
+      : p.eta === iso(tomorrow)
+        ? "tomorrow"
+        : p.eta
+          ? new Date(p.eta + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })
+          : "on the way";
+  return `<div class="section">Parcels</div>${parcels
+    .slice(0, 4)
+    .map(
+      (p) => `<div class="item"><span class="bell">📦</span><span class="title">${escapeHtml(p.title ?? p.merchant)}</span>
+      <span class="meta">${escapeHtml(when(p))}${p.deliveryCode ? ` · code ${escapeHtml(p.deliveryCode)}` : ""}</span></div>`,
+    )
+    .join("")}`;
+}
+
+function panelHtml(a: Agenda, parcels: EngineState["parcels"] = []): string {
   const day = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
   const pct = a.total ? Math.round((a.done.length / a.total) * 100) : 0;
   return `
@@ -177,6 +206,7 @@ function panelHtml(a: Agenda): string {
       ${section("Overdue", a.overdue, true)}
       ${section("Today", a.today)}
       ${section("Inbox · no date", a.inbox)}
+      ${parcelsHtml(parcels)}
       ${section("Done", a.done.slice(0, 4))}
     </div>
     <div class="panel-foot">

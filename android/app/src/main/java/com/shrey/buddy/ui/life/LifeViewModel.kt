@@ -15,6 +15,8 @@ import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.LocalShipping
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.ShoppingBag
@@ -68,6 +70,8 @@ enum class LifeModule(val label: String, val icon: ImageVector, val color: Color
     READING("Reading", Icons.AutoMirrored.Rounded.MenuBook, Color(0xFF30D5C8), "Books & courses"),
     VEHICLES("Vehicles", Icons.Rounded.DirectionsCar, BuddyColors.Fitness, "Fuel, service, renewals"),
     LIGHTS("Lights", Icons.Rounded.Lightbulb, Color(0xFFFFC94D), "WiZ bulbs, scenes & routines"),
+    SPLITS("Splits", Icons.Rounded.Groups, Color(0xFF7C9CFF), "Who owes who"),
+    PARCELS("Parcels", Icons.Rounded.LocalShipping, Color(0xFFFFB066), "Deliveries, from your SMS"),
     MUSIC("Music", Icons.Rounded.MusicNote, Color(0xFF5EE6D0), "Hum to MIDI, tuner & ear trainer"),
     WISHLIST("Wishlist", Icons.Rounded.ShoppingBag, Color(0xFFBF5AF2), "Think before you buy"),
     VAULT("Documents", Icons.Rounded.Folder, Color(0xFFB0B4BC), "IDs, insurance, warranties"),
@@ -247,6 +251,76 @@ class LifeViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun say(text: String) { _message.value = text }
+
+    // ---- Splits ----
+
+    val ious = obs(Kinds.IOU, com.shrey.buddy.data.items.Iou.serializer())
+
+    fun addSplit(d: com.shrey.buddy.finance.Splits.Draft, txnId: String?) = viewModelScope.launch {
+        val n = com.shrey.buddy.helpers.SplitKeeper.add(c, d, txnId)
+        if (n > 0) _message.value = if (d.theyOwe) "Added. Buddy will spot it when they pay you back." else "Added."
+    }
+
+    fun settleIou(item: Item<com.shrey.buddy.data.items.Iou>) = viewModelScope.launch {
+        com.shrey.buddy.helpers.SplitKeeper.settle(c, item.id, item.data)
+    }
+
+    fun unsettleIou(item: Item<com.shrey.buddy.data.items.Iou>) = viewModelScope.launch {
+        items.put(Kinds.IOU, item.data.copy(settledAt = null, settledTxnId = null), com.shrey.buddy.data.items.Iou.serializer(), id = item.id)
+    }
+
+    // ---- Parcels ----
+
+    val parcels = obs(Kinds.PARCEL, com.shrey.buddy.data.items.Parcel.serializer())
+
+    fun setParcelHidden(item: Item<com.shrey.buddy.data.items.Parcel>, hidden: Boolean) = viewModelScope.launch {
+        items.put(Kinds.PARCEL, item.data.copy(hidden = hidden), com.shrey.buddy.data.items.Parcel.serializer(), id = item.id)
+    }
+
+    fun markParcelDelivered(item: Item<com.shrey.buddy.data.items.Parcel>) = viewModelScope.launch {
+        items.put(
+            Kinds.PARCEL, item.data.copy(status = com.shrey.buddy.ingest.sms.ParcelStatus.DELIVERED.name, updatedAt = System.currentTimeMillis(), deliveryCode = null),
+            com.shrey.buddy.data.items.Parcel.serializer(), id = item.id,
+        )
+    }
+
+    // ---- Bill radar ----
+
+    private val _radar = MutableStateFlow<List<com.shrey.buddy.finance.BillRadar.Found>>(emptyList())
+    val radar = _radar.asStateFlow()
+    private val _stopped = MutableStateFlow<List<Pair<String, com.shrey.buddy.data.items.Recurring>>>(emptyList())
+    val stoppedBills = _stopped.asStateFlow()
+
+    fun scanBills() = viewModelScope.launch {
+        _radar.value = withContext(Dispatchers.Default) { runCatching { com.shrey.buddy.helpers.BillWatch.findings(c) }.getOrDefault(emptyList()) }
+        val gone = com.shrey.buddy.helpers.BillWatch.dismissed(c.context)
+        _stopped.value = withContext(Dispatchers.Default) {
+            com.shrey.buddy.finance.BillRadar.stopped(recurring.value.map { it.id to it.data }, c.db.transactionDao().all())
+                .filter { "stopped:${it.first}" !in gone }
+        }
+    }
+
+    fun acceptBill(f: com.shrey.buddy.finance.BillRadar.Found) = viewModelScope.launch {
+        if (f.kind == com.shrey.buddy.finance.BillRadar.Kind.PRICE_CHANGE && f.recurringId != null) {
+            val r = items.get(f.recurringId, com.shrey.buddy.data.items.Recurring.serializer())
+            if (r != null) items.put(Kinds.RECURRING, r.data.copy(amountMinor = f.amountMinor), com.shrey.buddy.data.items.Recurring.serializer(), id = r.id)
+        } else {
+            items.put(Kinds.RECURRING, f.toRecurring(), com.shrey.buddy.data.items.Recurring.serializer())
+        }
+        com.shrey.buddy.helpers.BillWatch.dismiss(c.context, f.key)
+        _radar.value = _radar.value - f
+    }
+
+    fun dismissBill(key: String) {
+        com.shrey.buddy.helpers.BillWatch.dismiss(c.context, key)
+        _radar.value = _radar.value.filter { it.key != key }
+        _stopped.value = _stopped.value.filter { "stopped:${it.first}" != key }
+    }
+
+    fun pauseBill(id: String, r: com.shrey.buddy.data.items.Recurring) = viewModelScope.launch {
+        items.put(Kinds.RECURRING, r.copy(active = false), com.shrey.buddy.data.items.Recurring.serializer(), id = id)
+        _stopped.value = _stopped.value.filter { it.first != id }
+    }
 
     /** Journal: one entry per day. */
     fun saveJournal(day: LocalDate, entry: Journal) =

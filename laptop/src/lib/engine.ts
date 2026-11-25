@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import * as cloud from "./cloud";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { loadSettings } from "./settings";
 import { toTask, completeRows, skipRow, tomorrowRow, snoozeRow, reopenRow, deleteRow, type Row, type Task } from "./tasks";
 
@@ -23,10 +24,20 @@ export interface Ring {
   repeats: boolean;
 }
 
+/** A one-time code from the phone, on screen for a few minutes. */
+export interface OtpCard {
+  id: string;
+  code: string;
+  source: string;
+  at: number;
+}
+
 /** What every window gets to draw from. */
 export interface EngineState {
   tasks: Row[];
   rings: Ring[];
+  otps: OtpCard[];
+  parcels: cloud.ParcelInfo[];
   online: boolean;
   signedIn: boolean;
   email: string | null;
@@ -44,6 +55,7 @@ export type Action =
   | { type: "delete"; taskId: string }
   | { type: "addRow"; row: Row }
   | { type: "addNote"; row: Row }
+  | { type: "otpClose"; id: string }
   | { type: "refresh" };
 
 interface Memory {
@@ -58,6 +70,8 @@ interface Memory {
 const MEMORY = "buddy-reminders";
 const RING_GRACE_MS = 10 * 60_000;
 const MISSED_WINDOW_MS = 12 * 60 * 60_000;
+/** How long a one-time code stays on screen. */
+const OTP_SHOW_MS = 3 * 60_000;
 
 function readMemory(): Memory {
   try {
@@ -72,6 +86,9 @@ function readMemory(): Memory {
 export class Engine {
   private tasks: Task[] = [];
   private rings: Ring[] = [];
+  private otps: OtpCard[] = [];
+  private seenOtps = new Set<string>();
+  private parcels: cloud.ParcelInfo[] = [];
   private online = true;
   private signedIn = false;
   private memory: Memory = readMemory();
@@ -91,6 +108,9 @@ export class Engine {
     setInterval(() => this.queue(() => this.checkAcks()), 10_000);
     setInterval(() => this.queue(() => this.beat()), 55_000);
     setInterval(() => this.tick(), 2_000);
+    // Codes from the phone: pushed the moment they arrive, with a slow check as a backup.
+    cloud.watchOtps(() => void this.checkOtps());
+    setInterval(() => void this.checkOtps(), 20_000);
     await this.queue(() => this.refresh());
     await this.queue(() => this.beat());
   }
@@ -132,6 +152,7 @@ export class Engine {
         this.memory.initialised = true;
       }
       await this.checkAcks();
+      this.parcels = await cloud.activeParcels().catch(() => this.parcels);
       // Finished or deleted elsewhere: close its pop-up.
       const open = new Map(this.tasks.filter((t) => !t.isDone).map((t) => [t.id, t]));
       this.rings = this.rings.filter((r) => open.get(r.taskId)?.remindAt === r.base);
@@ -176,10 +197,38 @@ export class Engine {
     return t.remindAt;
   }
 
+  /** New codes from the phone: show, copy, and delete them from the server straight away. */
+  private async checkOtps(): Promise<void> {
+    if (!this.signedIn) return;
+    let rows: cloud.Otp[];
+    try {
+      rows = await cloud.freshOtps();
+    } catch {
+      return;
+    }
+    let added = false;
+    for (const o of rows) {
+      void cloud.deleteOtp(o.id).catch(() => undefined);
+      if (this.seenOtps.has(o.id)) continue;
+      this.seenOtps.add(o.id);
+      this.otps = [...this.otps.filter((x) => x.code !== o.code), { id: o.id, code: o.code, source: o.source ?? "SMS", at: Date.now() }];
+      added = true;
+    }
+    if (!added) return;
+    const latest = this.otps[this.otps.length - 1];
+    await writeText(latest.code).catch(() => undefined);
+    this.publish();
+    await this.announce();
+  }
+
   /** Looks at every task once a couple of seconds: rings what's due. */
   private tick(): void {
     const now = Date.now();
     let changed = false;
+    if (this.otps.some((o) => now - o.at > OTP_SHOW_MS)) {
+      this.otps = this.otps.filter((o) => now - o.at <= OTP_SHOW_MS);
+      this.publish();
+    }
     for (const t of this.tasks) {
       if (t.isDone || t.remindAt === null) continue;
       const at = this.effective(t);
@@ -208,20 +257,22 @@ export class Engine {
   private async announce(): Promise<void> {
     const settings = loadSettings();
     if (settings.sound) await invoke("notify_sound").catch(() => undefined);
-    await showCards(this.rings.length);
+    await showCards(this.rings.length + this.otps.length);
   }
 
   private publish(): void {
     const state: EngineState = {
       tasks: this.tasks.map((t) => t.row),
       rings: this.rings,
+      otps: this.otps,
+      parcels: this.parcels,
       online: this.online,
       signedIn: this.signedIn,
       email: null,
       queued: cloud.queued(),
     };
     void emit("buddy-state", state);
-    if (this.rings.length === 0) void hideCards();
+    if (this.rings.length === 0 && this.otps.length === 0) void hideCards();
   }
 
   // ---------------------------------------------------------------- actions
@@ -239,6 +290,11 @@ export class Engine {
    * could take a while and would redraw the old card meanwhile); the saving happens in the queue.
    */
   private receive(a: Action): void {
+    if (a.type === "otpClose") {
+      this.otps = this.otps.filter((o) => o.id !== a.id);
+      this.publish();
+      return;
+    }
     if (a.type === "done" || a.type === "snooze" || a.type === "tomorrow" || a.type === "dismiss") {
       const r = this.findRing(a.ring) ?? a.ring;
       this.closeRing(r);
