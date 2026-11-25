@@ -42,6 +42,8 @@ object Kinds {
     const val MONEY_BACK = "money_back"
     const val LIGHT = "light"
     const val LIGHT_ROUTINE = "light_routine"
+    /** A hummed / sung tune in the Music idea vault. */
+    const val HUM = "hum"
 }
 
 // ---- Health ----
@@ -491,4 +493,30 @@ data class LightRoutine(
     val after: String? = null,
     val action: LightAction = LightAction(),
     val enabled: Boolean = true,
+)
+
+// ---- Music ----
+
+/** A note of a hum: starts [at] ms in, lasts [len] ms. */
+@Serializable
+data class HumNote(val at: Int = 0, val len: Int = 0, val midi: Int = 60)
+
+/**
+ * A tune in the idea vault. Notes, key, tempo and chords sync; the recording itself ([audio], a file name in
+ * the app's files/hums folder) stays on the phone that recorded it.
+ */
+@Serializable
+data class Hum(
+    val title: String = "",
+    val notes: List<HumNote> = emptyList(),
+    val bpm: Int = 100,
+    /** "A minor"; blank when too short to tell. */
+    val key: String = "",
+    /** One chord symbol per bar of 4 beats. */
+    val chords: List<String> = emptyList(),
+    val lengthMs: Int = 0,
+    val audio: String? = null,
+    /** Where in the recording the first note starts (notes are stored from 0). */
+    val audioOffsetMs: Int = 0,
+    val createdAt: Long = 0,
 )

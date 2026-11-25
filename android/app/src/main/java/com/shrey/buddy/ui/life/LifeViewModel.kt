@@ -15,6 +15,7 @@ import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.StickyNote2
@@ -67,6 +68,7 @@ enum class LifeModule(val label: String, val icon: ImageVector, val color: Color
     READING("Reading", Icons.AutoMirrored.Rounded.MenuBook, Color(0xFF30D5C8), "Books & courses"),
     VEHICLES("Vehicles", Icons.Rounded.DirectionsCar, BuddyColors.Fitness, "Fuel, service, renewals"),
     LIGHTS("Lights", Icons.Rounded.Lightbulb, Color(0xFFFFC94D), "WiZ bulbs, scenes & routines"),
+    MUSIC("Music", Icons.Rounded.MusicNote, Color(0xFF5EE6D0), "Hum to MIDI, tuner & ear trainer"),
     WISHLIST("Wishlist", Icons.Rounded.ShoppingBag, Color(0xFFBF5AF2), "Think before you buy"),
     VAULT("Documents", Icons.Rounded.Folder, Color(0xFFB0B4BC), "IDs, insurance, warranties"),
     NET_WORTH("Net worth", Icons.AutoMirrored.Rounded.TrendingUp, Color(0xFF34C759), "Investments & balances"),
@@ -224,6 +226,27 @@ class LifeViewModel(private val c: AppContainer) : ViewModel() {
         viewModelScope.launch { items.put(kind, data, serializer, id = id, occurredOn = date, refId = refId) }
 
     fun delete(id: String) = viewModelScope.launch { items.delete(id) }
+
+    // ---- Music: the idea vault ----
+
+    val hums = obs(Kinds.HUM, com.shrey.buddy.data.items.Hum.serializer())
+
+    /** Where a hum's recording lives on this phone. */
+    fun humFile(name: String) = File(c.context.filesDir, "hums/$name")
+
+    suspend fun saveHum(hum: com.shrey.buddy.data.items.Hum, id: String? = null): String =
+        items.put(Kinds.HUM, hum, com.shrey.buddy.data.items.Hum.serializer(), id = id, occurredOn = LocalDate.now().takeIf { id == null })
+
+    fun updateHum(id: String, hum: com.shrey.buddy.data.items.Hum) = viewModelScope.launch {
+        items.put(Kinds.HUM, hum, com.shrey.buddy.data.items.Hum.serializer(), id = id)
+    }
+
+    fun deleteHum(item: Item<com.shrey.buddy.data.items.Hum>) = viewModelScope.launch {
+        items.delete(item.id)
+        item.data.audio?.let { withContext(Dispatchers.IO) { humFile(it).delete() } }
+    }
+
+    fun say(text: String) { _message.value = text }
 
     /** Journal: one entry per day. */
     fun saveJournal(day: LocalDate, entry: Journal) =

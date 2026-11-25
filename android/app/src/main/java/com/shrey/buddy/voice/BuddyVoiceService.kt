@@ -546,6 +546,16 @@ class BuddyVoiceService : Service(), RecognitionListener {
         }
 
         /**
+         * Frees the mic for something else in Buddy (humming, the tuner) without switching Hey Buddy off.
+         * Call [restoreIfWanted] when done. Returns true if it was listening.
+         */
+        fun pauseForMic(context: Context): Boolean {
+            if (_status.value !in setOf(VoiceStatus.LOADING, VoiceStatus.LISTENING, VoiceStatus.HEARING_COMMAND)) return false
+            context.stopService(Intent(context, BuddyVoiceService::class.java))
+            return true
+        }
+
+        /**
          * Turns Hey Buddy back on if you had it on (an update or reboot kills it). Must be called while Buddy is
          * in the foreground — Android only lets a visible app start listening to the mic. Returns false if it couldn't.
          */

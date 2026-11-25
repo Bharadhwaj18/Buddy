@@ -6,4 +6,6 @@
     <cache-path name="captures" path="captures/" />
     <!-- Documents downloaded from the vault for viewing. -->
     <cache-path name="vault" path="vault/" />
+    <!-- MIDI / WAV files shared from Music. -->
+    <cache-path name="music" path="music/" />
 </paths>
