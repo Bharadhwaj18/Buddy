@@ -446,3 +446,41 @@ select.field, input.field {
 
 /* One-time code from the phone */
 .ring.otp .otp-code { font-size: 30px; font-weight: 700; letter-spacing: 6px; margin-top: 6px; font-variant-numeric: tabular-nums; user-select: all; }
+
+/* ---------------------------------------------------------------- task details (in the pill's drop-down) */
+
+.item[data-task] { cursor: pointer; }
+.item[data-task]:hover { background: var(--surface-alt); }
+.item.late[data-task]:hover { filter: brightness(0.98); }
+.sheet { display: flex; flex-direction: column; max-height: 600px; position: relative; }
+.sheet-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; }
+.sheet-kind { flex: 1; font-size: 12px; color: var(--dim); }
+.sheet-body { padding: 4px 16px 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; user-select: text; }
+.sheet-body .field { width: 100%; box-sizing: border-box; }
+.sheet-title { font-size: 15px; font-weight: 500; padding: 9px 10px; }
+.sheet-label { font-size: 11px; color: var(--dim); margin-top: 8px; }
+.sheet-label .hint { color: var(--faint); margin-left: 4px; }
+.sheet-hint { font-size: 11px; color: var(--accent-text); min-height: 14px; }
+.sheet-hint.bad { color: var(--dim); }
+.sheet-row { display: flex; gap: 8px; }
+.sheet-row > * { flex: 1; min-width: 0; }
+.sheet-col { display: flex; flex-direction: column; gap: 4px; }
+.sheet-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip-btn { border: 1px solid var(--line); background: var(--surface-alt); border-radius: 999px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+.chip-btn:hover { border-color: var(--accent); }
+.sheet-body textarea.field { resize: vertical; min-height: 54px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font: inherit; font-size: 13px; }
+.sheet-meta { font-size: 11px; color: var(--faint); margin-top: 6px; }
+.sheet-error { font-size: 12px; color: var(--late); }
+.sheet-error:empty { display: none; }
+.sheet-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface-alt); }
+.sheet-foot .grow { flex: 1; }
+.sheet-confirm { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--line); font-size: 13px; }
+.sheet-confirm span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-confirm[hidden] { display: none; }
+.pill-btn.danger { background: var(--late); color: #fff; }
+.icon-btn.danger:hover { color: var(--late); }
+
+/* lists picker in settings */
+.setting.lists { flex-wrap: wrap; }
+.setting.lists .sheet-chips { margin-top: 0; justify-content: flex-end; max-width: 60%; }
+.chip-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }

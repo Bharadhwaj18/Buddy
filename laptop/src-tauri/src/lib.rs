@@ -137,8 +137,15 @@ fn device_name() -> String {
 fn notify_sound() -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", "ms-winsoundevent:Notification.Default"])
+    // Played straight from Windows' sound file. (Opening an ms-winsoundevent: link asked Windows for
+    // an app to open it with, and showed "Get an app to open this link" instead.)
+    std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(New-Object Media.SoundPlayer ($env:SystemRoot + '\\Media\\Windows Notify System Generic.wav')).PlaySync()",
+        ])
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map(|_| ())

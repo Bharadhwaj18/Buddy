@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
         // An update or reboot stops Hey Buddy; switch it back on as soon as Buddy is open.
         com.shrey.buddy.voice.BuddyVoiceService.restoreIfWanted(this)
         runCatching { com.shrey.buddy.data.sync.DailyWorker.catchUp(this) }
+        // Opening Buddy always brings in what was added elsewhere (the laptop).
+        runCatching { com.shrey.buddy.data.sync.LiveSync.syncNow(this) }
         lifecycleScope.launch { runCatching { com.shrey.buddy.helpers.ParcelTracker.backfillOnce((application as BuddyApp).container) } }
     }
 

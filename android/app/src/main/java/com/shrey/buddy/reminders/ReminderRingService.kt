@@ -95,6 +95,7 @@ class ReminderRingService : Service() {
             if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE else 0,
         )
         startRinging()
+        watchLaptop(info)
         // While the phone is in use the full-screen intent only shows a heads-up, so open the call screen
         // directly (allowed because Buddy can draw over other apps).
         if (Settings.canDrawOverlays(this)) {
@@ -106,6 +107,27 @@ class ReminderRingService : Service() {
         // Short foreground services are capped at ~3 minutes, so stay well under that.
         handler.postDelayed(timeout, ReminderSettings.get(this).ringSeconds.coerceIn(15, 120) * 1000L)
         return START_NOT_STICKY
+    }
+
+    private var watcher: kotlinx.coroutines.Job? = null
+
+    /** Answered on the laptop while the phone rings: stop ringing here too. */
+    private fun watchLaptop(info: RingInfo) {
+        if (watcher?.isActive == true) return
+        val app = applicationContext
+        val since = System.currentTimeMillis()
+        watcher = ReminderScheduler.scope.launch {
+            val laptopOn = runCatching { LaptopFirst.laptopSeenRecently(app, since) }.getOrDefault(false)
+            if (!laptopOn) return@launch
+            while (ReminderRinging.current.value?.taskId == info.taskId) {
+                kotlinx.coroutines.delay(4_000)
+                val task = (app as BuddyApp).container.tasks.get(info.taskId) ?: return@launch
+                if (LaptopFirst.answeredElsewhere(app, task, since) != null) {
+                    handler.post { if (ReminderRinging.current.value?.taskId == info.taskId) finish() }
+                    return@launch
+                }
+            }
+        }
     }
 
     private fun startRinging() {
@@ -173,6 +195,8 @@ class ReminderRingService : Service() {
     }
 
     private fun finish() {
+        watcher?.cancel()
+        watcher = null
         handler.removeCallbacksAndMessages(null)
         stopSpeaking()
         player?.runCatching { stop(); release() }

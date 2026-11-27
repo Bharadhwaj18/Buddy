@@ -1,8 +1,10 @@
 // Quick words that skip the AI, and the times Buddy picks when you don't say one.
 //   "rm call Ravi 4pm" or "!call Ravi"  → a reminder (next round hour if no time is given)
 //   "t: send the deck"                   → a task (on Today, no time)
-// Times understood at the end: "4pm", "4:30 pm", "at 16:00", "in 20 min", "in 2 hours",
-// "tonight", "tomorrow", "tomorrow 9am".
+// Dates and times are read by when.ts (the same rules as the phone): "2.30 pm", "half past 4",
+// "tomorrow evening at 6", "in 20 min", "28/11 4pm" and so on.
+
+import { parseWhen, whenMs } from "./when";
 
 export interface Draft {
   kind: "reminder" | "task";
@@ -71,40 +73,10 @@ function clock(s: string): [number, number] | null {
   return [h, mi];
 }
 
-/** Takes a time phrase off the end of the text. at is null when there is none. */
+/** Takes the date / time out of the text (anywhere in it; see when.ts). at is null when there is none. */
 export function splitTime(text: string, now = Date.now()): { title: string; at: number | null; hasTime: boolean } {
-  const s = text.trim();
-  const tidy = (t: string) => t.replace(/[\s,]+(at|on|by)?$/i, "").trim();
-
-  let m = s.match(/^(.*?)\s+in\s+(\d+)\s*(m|min|mins|minutes?|h|hr|hrs|hours?)$/i);
-  if (m) {
-    const n = Number(m[2]);
-    const minutes = /^h/i.test(m[3]) ? n * 60 : n;
-    return { title: tidy(m[1]), at: now + minutes * 60_000, hasTime: true };
-  }
-
-  m = s.match(/^(.*?)\s+(tomorrow|tmrw|today|tonight)(?:\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i);
-  if (m) {
-    const word = m[2].toLowerCase();
-    const day = new Date(now);
-    if (word === "tomorrow" || word === "tmrw") day.setDate(day.getDate() + 1);
-    const c = m[3] ? clock(m[3]) : null;
-    if (m[3] && !c) return { title: s, at: null, hasTime: false };
-    if (c) return { title: tidy(m[1]), at: atHour(day.getTime(), c[0], c[1]), hasTime: true };
-    if (word === "tonight") return { title: tidy(m[1]), at: atHour(day.getTime(), 20), hasTime: true };
-    return { title: tidy(m[1]), at: atHour(day.getTime(), 0), hasTime: false };
-  }
-
-  m = s.match(/^(.*?)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$/i);
-  if (m) {
-    const c = clock(m[2]);
-    if (c) {
-      let at = atHour(now, c[0], c[1]);
-      if (at <= now) at += 86_400_000; // 9am said at 3pm means tomorrow
-      return { title: tidy(m[1]), at, hasTime: true };
-    }
-  }
-  return { title: s, at: null, hasTime: false };
+  const w = parseWhen(text, new Date(now));
+  return { title: w.title, at: whenMs(w), hasTime: w.time !== null };
 }
 
 export interface Chip {

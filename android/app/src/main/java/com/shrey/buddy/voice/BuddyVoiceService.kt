@@ -69,6 +69,10 @@ class BuddyVoiceService : Service(), RecognitionListener {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_CANCEL) {
+            cancelCommand()
+            return START_STICKY
+        }
         if (_status.value == VoiceStatus.LISTENING || _status.value == VoiceStatus.LOADING) return START_STICKY
         try {
             ensureChannel()
@@ -112,7 +116,7 @@ class BuddyVoiceService : Service(), RecognitionListener {
         restartSpeech(Recognizer(m, SAMPLE_RATE, WAKE_GRAMMAR).apply { setWords(true) }, timeoutMs = null)
         inCommand = false
         _status.value = VoiceStatus.LISTENING
-        updateNotification("Listening for “Hey Buddy”")
+        updateNotification("Listening for “Buddy listen”")
     }
 
     private fun listenForCommand() {
@@ -197,6 +201,28 @@ class BuddyVoiceService : Service(), RecognitionListener {
         main.postDelayed({ if (model != null) listenForWakeWord() }, 5_000)
     }
 
+    /** Command being worked on (sent to Buddy AI / applied); cancelled with the command. */
+    private var commandJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * You cancelled: stop listening, drop whatever was heard or is being worked on, say nothing, and go
+     * back to waiting for the wake phrase.
+     */
+    private fun cancelCommand() {
+        log("cancel", null)
+        inCommand = false
+        lastCommandEndedAt = System.currentTimeMillis()
+        releaseAndroidRecognizer()
+        commandJob?.cancel()
+        commandJob = null
+        tts?.runCatching { stop() }
+        speakingUntil = 0
+        unduck()
+        getSystemService(NotificationManager::class.java).cancel(LIVE_NOTIFICATION_ID)
+        VoiceLive.set(Live.Idle)
+        if (model != null) listenForWakeWord()
+    }
+
     private fun onWake() {
         if (inCommand) return
         inCommand = true
@@ -215,6 +241,7 @@ class BuddyVoiceService : Service(), RecognitionListener {
      * numbers than the small offline model). Falls back to offline Vosk if it isn't available or fails.
      */
     private fun startCommandCapture() {
+        if (!inCommand) return // cancelled before listening started
         speech?.let { it.stop(); it.shutdown() }
         speech = null
         _status.value = VoiceStatus.HEARING_COMMAND
@@ -287,6 +314,7 @@ class BuddyVoiceService : Service(), RecognitionListener {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setTimeoutAfter(12_000)
+            .addAction(0, "Cancel", PendingIntent.getService(this, 3, Intent(this, BuddyVoiceService::class.java).setAction(ACTION_CANCEL), PendingIntent.FLAG_IMMUTABLE))
             .build()
         getSystemService(NotificationManager::class.java).notify(LIVE_NOTIFICATION_ID, n)
     }
@@ -299,7 +327,7 @@ class BuddyVoiceService : Service(), RecognitionListener {
         log("command", heard.ifEmpty { "(nothing heard)" })
         getSystemService(NotificationManager::class.java).cancel(LIVE_NOTIFICATION_ID)
         if (heard.isEmpty()) {
-            VoiceLive.set(Live.Done("Didn't catch that — say “Hey Buddy” and try again."))
+            VoiceLive.set(Live.Done("Didn't catch that — say “Buddy listen” and try again."))
             updateNotification("Didn't catch that")
             say("Sorry, I didn't catch that.")
         } else {
@@ -313,9 +341,11 @@ class BuddyVoiceService : Service(), RecognitionListener {
     /** Hand the transcript to Gemini (via the Edge Function) and apply the resulting actions. */
     private fun act(transcript: String) {
         val container = (applicationContext as BuddyApp).container
-        logScope.launch {
+        commandJob = logScope.launch {
             val summary = try {
                 VoiceCommands.handle(container, transcript)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "voice command failed", e)
                 "${e.message ?: "Couldn't reach Buddy AI"} — you said: “$transcript”"
@@ -325,7 +355,7 @@ class BuddyVoiceService : Service(), RecognitionListener {
             done()
             showResult(summary)
             main.post { say(summary) }
-            main.post { if (_status.value == VoiceStatus.LISTENING) updateNotification("Listening for “Hey Buddy”") }
+            main.post { if (_status.value == VoiceStatus.LISTENING) updateNotification("Listening for “Buddy listen”") }
         }
     }
 
@@ -459,9 +489,9 @@ class BuddyVoiceService : Service(), RecognitionListener {
 
     private fun ensureChannel() {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Hey Buddy listening", NotificationManager.IMPORTANCE_LOW))
-        nm.createNotificationChannel(NotificationChannel(RESULT_CHANNEL, "Hey Buddy results", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(LIVE_CHANNEL, "Hey Buddy is listening", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Buddy listen: waiting", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(RESULT_CHANNEL, "Buddy listen: results", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(LIVE_CHANNEL, "Buddy listen: listening now", NotificationManager.IMPORTANCE_HIGH))
     }
 
     private fun notification(text: String): Notification {
@@ -511,11 +541,14 @@ class BuddyVoiceService : Service(), RecognitionListener {
         private const val LIVE_CHANNEL = "voice_live"
         private const val LIVE_NOTIFICATION_ID = 47
         private const val ACTION_STOP = "com.shrey.buddy.voice.STOP"
+        const val ACTION_CANCEL = "com.shrey.buddy.voice.CANCEL"
         private const val SAMPLE_RATE = 16000f
-        // Only these two phrases wake Buddy. "[unk]" soaks up all other speech/noise so it isn't forced
-        // onto a wake phrase (a lone "buddy" used to match "body", "daddy", TV chatter…).
-        private val WAKE_PHRASES = setOf("hey buddy", "hi buddy")
-        private const val WAKE_GRAMMAR = """["hey buddy", "hi buddy", "[unk]"]"""
+        // Only "buddy listen" (both words) wakes Buddy. The other entries are decoys: a lone "buddy", "hey buddy",
+        // "listen", "body"… decode as themselves instead of being forced onto the wake phrase, and "[unk]"
+        // soaks up all other speech/noise.
+        private val WAKE_PHRASES = setOf("buddy listen")
+        private const val WAKE_GRAMMAR =
+            """["buddy listen", "buddy", "hey buddy", "hi buddy", "listen", "body", "buddy is", "lesson", "[unk]"]"""
 
         /** How sure the recognizer must be of every word (0–1). Vosk gives ~1.0 for a clear "hey buddy". */
         private const val MIN_WORD_CONF = 0.9

@@ -39,7 +39,7 @@ class VoiceResumeActivity : Activity() {
             if (started) return
             // Fallback: one tap to turn it back on.
             val nm = context.getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Hey Buddy paused", NotificationManager.IMPORTANCE_DEFAULT))
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Buddy listen paused", NotificationManager.IMPORTANCE_DEFAULT))
             val open = PendingIntent.getActivity(
                 context, ID, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
@@ -48,7 +48,7 @@ class VoiceResumeActivity : Activity() {
                     ID,
                     NotificationCompat.Builder(context, CHANNEL)
                         .setSmallIcon(R.drawable.ic_stat_buddy)
-                        .setContentTitle("Hey Buddy is paused")
+                        .setContentTitle("Buddy listen is paused")
                         .setContentText("Tap to turn it back on")
                         .setContentIntent(open)
                         .setAutoCancel(true)

@@ -9,18 +9,24 @@ import { toTask, buildAgenda, type Task, type Agenda } from "../lib/tasks";
 import type { EngineState } from "../lib/engine";
 import { loadSettings, updateSettings } from "../lib/settings";
 import { escapeHtml, timeOf, whenText, capitalise } from "../lib/format";
+import { sheetHtml, wireSheet, readSheet } from "./taskSheet";
 
 /** Window size while the drop-down is open. Closed, the window is sized to the pill itself. */
 const OPEN = { w: 360, h: 470 };
+/** Taller while a task's details are open. */
+const EDITING = { w: 360, h: 640 };
 /** How far the mouse must move (px) before a press becomes a drag instead of a click. */
 const DRAG_START_PX = 4;
 
 export function mountPill(root: HTMLElement): void {
   const win: TauriWindow = getCurrentWindow();
-  let state: EngineState = { tasks: [], rings: [], otps: [], parcels: [], online: true, signedIn: false, email: null, queued: 0 };
+  let state: EngineState = { tasks: [], rings: [], otps: [], parcels: [], online: true, signedIn: false, email: null, queued: 0, failed: 0, plans: [], lists: [] };
   let open = false;
   let placing = false;
   let closeTimer: number | undefined;
+  /** The task whose details are open (the list is swapped for them), or null. */
+  let editing: string | null = null;
+  let hovering = false;
 
   const settings = loadSettings();
   let centreX = settings.pillX ?? Math.round(window.screen.availWidth / 2);
@@ -50,7 +56,8 @@ export function mountPill(root: HTMLElement): void {
   let lastSize = "";
   async function place(next: boolean): Promise<void> {
     const p = pillSize();
-    const size = next ? { w: Math.max(OPEN.w, p.w), h: OPEN.h } : p;
+    const want = editing ? EDITING : OPEN;
+    const size = next ? { w: Math.max(want.w, p.w), h: want.h } : p;
     const key = `${size.w}x${size.h}@${Math.round(centreX)},${Math.round(topY)}`;
     if (key === lastSize) return;
     lastSize = key;
@@ -90,12 +97,16 @@ export function mountPill(root: HTMLElement): void {
 
   let openTimer: number | undefined;
   rootEl.addEventListener("mouseenter", () => {
+    hovering = true;
     window.clearTimeout(closeTimer);
     // A short wait, so grabbing the pill to move it doesn't open the list first.
     openTimer = window.setTimeout(() => setOpen(true), 160);
   });
   rootEl.addEventListener("mouseleave", () => {
+    hovering = false;
     window.clearTimeout(openTimer);
+    // Details stay open while you're editing (a date picker or a stray mouse mustn't close them).
+    if (editing) return;
     window.clearTimeout(closeTimer);
     closeTimer = window.setTimeout(() => setOpen(false), 140);
   });
@@ -118,11 +129,78 @@ export function mountPill(root: HTMLElement): void {
     if (!press) return;
     press = null;
     window.clearTimeout(openTimer);
+    closeSheet();
     setOpen(false);
     void invoke("open_bar");
   });
 
+  // ---------------------------------------------------------------- details view
+
+  function openSheet(id: string): void {
+    const t = state.tasks.map(toTask).find((x) => x.id === id);
+    if (!t) return;
+    editing = id;
+    panel.innerHTML = sheetHtml(t);
+    wireSheet(panel.querySelector<HTMLElement>(".sheet")!);
+    lastSize = "";
+    void place(true);
+    // Typing needs the keyboard: this little window doesn't take focus on its own.
+    void win.setFocus();
+    window.setTimeout(() => panel.querySelector<HTMLInputElement>("[name=title]")?.focus(), 30);
+  }
+
+  function closeSheet(): void {
+    if (!editing) return;
+    editing = null;
+    lastSize = "";
+    render();
+    if (open) void place(true);
+    if (!hovering) closeTimer = window.setTimeout(() => setOpen(false), 400);
+  }
+
+  window.addEventListener("keydown", (e) => {
+    if (!editing) return;
+    if (e.key === "Escape") closeSheet();
+    const tag = (e.target as HTMLElement).tagName;
+    if (e.key === "Enter" && (e.ctrlKey || tag === "INPUT")) {
+      e.preventDefault();
+      panel.querySelector<HTMLElement>("[data-sheet-act=save]")?.click();
+    }
+  });
+
+  function sheetClick(e: MouseEvent): boolean {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>("[data-sheet-act]");
+    if (!btn || !editing) return false;
+    e.stopPropagation();
+    const sheet = panel.querySelector<HTMLElement>(".sheet")!;
+    const id = editing;
+    const t = state.tasks.map(toTask).find((x) => x.id === id);
+    const act = btn.dataset.sheetAct!;
+    const confirm = sheet.querySelector<HTMLElement>("[data-confirm]")!;
+    if (act === "back") closeSheet();
+    else if (act === "delete") confirm.hidden = false;
+    else if (act === "keep") confirm.hidden = true;
+    else if (act === "really-delete") {
+      void emit("buddy-action", { type: "delete", taskId: id });
+      closeSheet();
+    } else if (act === "done" || act === "reopen") {
+      void emit("buddy-action", { type: act === "done" ? "complete" : "reopen", taskId: id });
+      closeSheet();
+    } else if (act === "save" && t) {
+      const r = readSheet(sheet, t);
+      if ("error" in r) {
+        sheet.querySelector<HTMLElement>("[data-error]")!.textContent = r.error;
+        return true;
+      }
+      if (Object.keys(r.patch).length > 0) void emit("buddy-action", { type: "update", taskId: id, patch: r.patch });
+      closeSheet();
+    }
+    return true;
+  }
+
   panel.addEventListener("click", (e) => {
+    if (sheetClick(e)) return;
+    if (editing) return;
     if ((e.target as HTMLElement).closest("[data-add]")) {
       e.stopPropagation();
       setOpen(false);
@@ -130,7 +208,15 @@ export function mountPill(root: HTMLElement): void {
       return;
     }
     const box = (e.target as HTMLElement).closest<HTMLElement>("[data-check]");
-    if (!box) return;
+    if (!box) {
+      // Anywhere else on a row: open its details.
+      const row = (e.target as HTMLElement).closest<HTMLElement>("[data-task]");
+      if (row) {
+        e.stopPropagation();
+        openSheet(row.dataset.task!);
+      }
+      return;
+    }
     e.stopPropagation();
     const id = box.dataset.check!;
     const task = state.tasks.map(toTask).find((t) => t.id === id);
@@ -156,7 +242,12 @@ export function mountPill(root: HTMLElement): void {
     parcelChip.title = arriving.map((p) => `${p.title ?? p.merchant} arriving today`).join(", ");
     const next = root.querySelector<HTMLElement>(".next")!;
     next.textContent = a.next ? `Next · ${a.next.title} ${timeOf(a.next.remindAt!)}` : "";
-    panel.innerHTML = panelHtml(a, state.parcels);
+    if (editing) {
+      // Don't wipe what's being typed. If the task went away (deleted on the phone), leave the details.
+      if (!tasks.some((t) => t.id === editing)) closeSheet();
+    } else {
+      panel.innerHTML = panelHtml(a, state.parcels);
+    }
     // The text changed, so the pill may be wider or narrower: fit the window to it.
     if (!open) void place(false);
   }
@@ -235,6 +326,6 @@ function item(t: Task, late: boolean): string {
             ? `<span class="chip warn">${capitalise(t.priority)}</span>`
             : "";
   const cls = ["item", late ? "late" : "", t.isDone ? "done" : ""].join(" ");
-  return `<div class="${cls}"><span class="check ${t.isDone ? "done" : ""}" data-check="${escapeHtml(t.id)}"></span>
+  return `<div class="${cls}" data-task="${escapeHtml(t.id)}" title="Click for details"><span class="check ${t.isDone ? "done" : ""}" data-check="${escapeHtml(t.id)}"></span>
     <span class="title">${escapeHtml(t.title)}</span>${meta}</div>`;
 }

@@ -80,7 +80,7 @@ private fun VoiceStatus.isOn() = this == VoiceStatus.LOADING || this == VoiceSta
 private fun VoiceStatus.label() = when (this) {
     VoiceStatus.OFF -> "Off"
     VoiceStatus.LOADING -> "Loading speech model…"
-    VoiceStatus.LISTENING -> "Listening for “Hey Buddy”"
+    VoiceStatus.LISTENING -> "Listening for “Buddy listen”"
     VoiceStatus.HEARING_COMMAND -> "Listening to you…"
     VoiceStatus.ERROR -> "Stopped — see the latest event below"
 }
@@ -144,7 +144,7 @@ fun BuddyScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     PulsingMic(status)
                     Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
-                        Text("Hey Buddy", style = MaterialTheme.typography.titleLarge)
+                        Text("Buddy listen", style = MaterialTheme.typography.titleLarge)
                         Text(status.label(), style = MaterialTheme.typography.bodyMedium, color = BuddyColors.TextSecondary)
                     }
                     Switch(
@@ -164,7 +164,7 @@ fun BuddyScreen(
                     )
                 }
                 Text(
-                    "Say “Hey Buddy”, wait for the double buzz, then speak: “spent 450 on lunch”, “remind me to pay rent Friday”, " +
+                    "Say “Buddy listen” (both words), wait for the double buzz, then speak: “spent 450 on lunch”, “remind me to pay rent Friday”, " +
                         "“how much did I spend this week?”",
                     style = MaterialTheme.typography.bodySmall,
                     color = BuddyColors.TextTertiary,
@@ -205,7 +205,7 @@ fun BuddyScreen(
             }
         }
 
-        item { SectionHeader("Hey Buddy · spike stats") }
+        item { SectionHeader("Buddy listen · stats") }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val running = lastStart?.takeIf { status.isOn() }?.let { formatDuration(now - it.at) } ?: "—"
@@ -219,7 +219,7 @@ fun BuddyScreen(
         item { SectionHeader("Voice log") }
         item {
             BuddyCard(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
-                if (events.isEmpty()) EmptyNote("Nothing yet. Turn on Hey Buddy and try it.", Modifier.padding(horizontal = 8.dp))
+                if (events.isEmpty()) EmptyNote("Nothing yet. Turn on Buddy listen and try it.", Modifier.padding(horizontal = 8.dp))
                 events.forEach { VoiceEventRow(it, Modifier.padding(horizontal = 8.dp)) }
             }
         }
@@ -289,7 +289,7 @@ private val eventTime: DateFormat = DateFormat.getDateTimeInstance(DateFormat.SH
 @Composable
 private fun VoiceEventRow(e: VoiceEvent, modifier: Modifier = Modifier) {
     val (icon, tint, title) = when (e.kind) {
-        "wake" -> Triple(Icons.Rounded.GraphicEq, BuddyColors.Voice, "Heard “Hey Buddy”")
+        "wake" -> Triple(Icons.Rounded.GraphicEq, BuddyColors.Voice, "Heard “Buddy listen”")
         "wake_rejected" -> Triple(Icons.Rounded.GraphicEq, BuddyColors.TextTertiary, "Ignored ${e.text.orEmpty()}")
         "command" -> Triple(Icons.Rounded.ChatBubbleOutline, BuddyColors.TextPrimary, "“${e.text.orEmpty()}”")
         "result" -> Triple(Icons.Rounded.AutoAwesome, BuddyColors.Lime, e.text.orEmpty())

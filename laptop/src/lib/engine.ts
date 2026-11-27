@@ -1,7 +1,7 @@
 // The reminder engine. It runs once, in the hidden "cards" window: it keeps tasks in step with the server,
 // rings reminders, answers the other windows, and broadcasts its state to them.
 //
-// Laptop first: a reminder pops up here at its time. The phone waits 30 s and checks reminder_acks;
+// Laptop first: a reminder pops up here at its time. The phone waits 5 min and checks reminder_acks;
 // anything done here (Done / Snooze / Tomorrow / Dismiss) is written there, so the phone stays quiet.
 // Answers given on the phone close the pop-up here.
 
@@ -12,7 +12,8 @@ import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import * as cloud from "./cloud";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { loadSettings } from "./settings";
-import { toTask, completeRows, skipRow, tomorrowRow, snoozeRow, reopenRow, deleteRow, type Row, type Task } from "./tasks";
+import { cachedPlans, cachePlans, chosenLists, type PlanInfo } from "./lists";
+import { toTask, completeRows, skipRow, tomorrowRow, snoozeRow, reopenRow, deleteRow, editRow, type Row, type Task, type TaskPatch } from "./tasks";
 
 /** A reminder showing on screen. [base] is the task's remind_at, the key acks are kept under. */
 export interface Ring {
@@ -42,6 +43,12 @@ export interface EngineState {
   signedIn: boolean;
   email: string | null;
   queued: number;
+  /** Writes the server refused for good (kept aside). */
+  failed: number;
+  /** Every list (plan), for the settings. */
+  plans: Array<{ id: string; name: string }>;
+  /** The lists this laptop shows (ids); empty while unknown. */
+  lists: string[];
 }
 
 /** Actions the other windows ask the engine to do. */
@@ -53,6 +60,7 @@ export type Action =
   | { type: "complete"; taskId: string }
   | { type: "reopen"; taskId: string }
   | { type: "delete"; taskId: string }
+  | { type: "update"; taskId: string; patch: TaskPatch }
   | { type: "addRow"; row: Row }
   | { type: "addNote"; row: Row }
   | { type: "otpClose"; id: string }
@@ -65,6 +73,9 @@ interface Memory {
   snoozes: Record<string, string>;
   lastAck: number;
   initialised: boolean;
+  /** The lists last told to the phone, and the item that holds them. */
+  sharedLists?: string;
+  listsItemId?: string;
 }
 
 const MEMORY = "buddy-reminders";
@@ -72,6 +83,8 @@ const RING_GRACE_MS = 10 * 60_000;
 const MISSED_WINDOW_MS = 12 * 60 * 60_000;
 /** How long a one-time code stays on screen. */
 const OTP_SHOW_MS = 3 * 60_000;
+/** The longest one engine job may take before the next one goes ahead. */
+const JOB_LIMIT_MS = 60_000;
 
 function readMemory(): Memory {
   try {
@@ -92,6 +105,7 @@ export class Engine {
   private online = true;
   private signedIn = false;
   private memory: Memory = readMemory();
+  private plans: PlanInfo[] = cachedPlans();
   private deviceName = "Laptop";
   private busy: Promise<void> = Promise.resolve();
 
@@ -103,7 +117,10 @@ export class Engine {
     await listen<Action>("buddy-action", (e) => this.receive(e.payload));
     // The reminder cards live in this same window and hand their buttons over directly.
     window.addEventListener("buddy-action-local", (e) => this.receive((e as CustomEvent<Action>).detail));
-    cloud.supabase.auth.onAuthStateChange(() => this.queue(() => this.refresh()));
+    // Never wait inside the sign-in library's callback (it waits for us in turn): just schedule a refresh.
+    cloud.supabase.auth.onAuthStateChange(() => {
+      setTimeout(() => void this.queue(() => this.refresh()), 0);
+    });
     setInterval(() => this.queue(() => this.refresh()), 30_000);
     setInterval(() => this.queue(() => this.checkAcks()), 10_000);
     setInterval(() => this.queue(() => this.beat()), 55_000);
@@ -115,9 +132,26 @@ export class Engine {
     await this.queue(() => this.beat());
   }
 
-  /** One thing at a time, so two writes or refreshes never interleave. */
+  /**
+   * One thing at a time, so two refreshes never interleave. Each job gets [JOB_LIMIT_MS]: a job that hangs
+   * (a request lost while the laptop slept) is given up on, so it can never freeze syncing and reminders.
+   */
   private queue(job: () => Promise<void>): Promise<void> {
-    this.busy = this.busy.then(job).catch((e) => console.warn("engine", e));
+    const limited = () =>
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("engine job took too long; moving on")), JOB_LIMIT_MS);
+        job().then(
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          (e) => {
+            clearTimeout(timer);
+            reject(e);
+          },
+        );
+      });
+    this.busy = this.busy.then(limited).catch((e) => console.warn("engine", e));
     return this.busy;
   }
 
@@ -140,11 +174,25 @@ export class Engine {
       this.publish();
       return;
     }
+    void cloud.watchPokes(() => void this.queue(() => this.refresh())).catch(() => undefined);
+    const plans = await cloud.plans().catch(() => null);
+    if (plans && plans.length > 0) {
+      this.plans = plans;
+      cachePlans(plans);
+    }
+    this.fileUnfiled();
+    this.shareLists();
     await cloud.flush().catch(() => undefined);
     try {
       const rows = await cloud.openTasks();
       this.online = true;
-      this.tasks = rows.map(toTask);
+      // Changes still waiting to be sent win over what the server has, so the screen never jumps back.
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      for (const p of cloud.pending("tasks")) {
+        if (p.deleted_at) byId.delete(p.id);
+        else byId.set(p.id, { ...(byId.get(p.id) ?? {}), ...p });
+      }
+      this.tasks = [...byId.values()].map(toTask);
       if (!this.memory.initialised) {
         // First run: don't pop up every past reminder.
         const now = Date.now();
@@ -155,7 +203,10 @@ export class Engine {
       this.parcels = await cloud.activeParcels().catch(() => this.parcels);
       // Finished or deleted elsewhere: close its pop-up.
       const open = new Map(this.tasks.filter((t) => !t.isDone).map((t) => [t.id, t]));
-      this.rings = this.rings.filter((r) => open.get(r.taskId)?.remindAt === r.base);
+      this.rings = this.rings.filter((r) => {
+        const t = open.get(r.taskId);
+        return t !== undefined && t.remindAt === r.base && this.shows(t);
+      });
     } catch {
       this.online = false;
     }
@@ -230,7 +281,7 @@ export class Engine {
       this.publish();
     }
     for (const t of this.tasks) {
-      if (t.isDone || t.remindAt === null) continue;
+      if (t.isDone || t.remindAt === null || !this.shows(t)) continue;
       const at = this.effective(t);
       if (at === null || at > now || this.memory.fired[t.id] === at) continue;
       this.memory.fired[t.id] = at;
@@ -260,9 +311,64 @@ export class Engine {
     await showCards(this.rings.length + this.otps.length);
   }
 
+  // ---------------------------------------------------------------- lists
+
+  /** The lists this laptop is about (settings, else Work); null while they aren't known. */
+  private lists(): Set<string> | null {
+    const ids = chosenLists(this.plans, loadSettings().lists);
+    return ids ? new Set(ids) : null;
+  }
+
+  private shows(t: Task): boolean {
+    const l = this.lists();
+    return l === null || l.has(t.row.plan_id as string);
+  }
+
+  /** Where something added on the laptop goes: the first chosen list's first column, at the bottom. */
+  private filing(): { planId: string | null; bucketId: string | null; position: number } {
+    const ids = chosenLists(this.plans, loadSettings().lists);
+    const plan = ids ? this.plans.find((p) => p.id === ids[0]) : undefined;
+    if (!plan) return { planId: null, bucketId: null, position: 0 };
+    const positions = this.tasks.filter((t) => t.row.bucket_id === plan.bucketId).map((t) => Number(t.row.position) || 0);
+    return { planId: plan.id, bucketId: plan.bucketId, position: Math.max(0, ...positions) + 1 };
+  }
+
+  /** Added before the lists were known (first start, offline): file them now, before they're sent. */
+  private fileUnfiled(): void {
+    const f = this.filing();
+    if (!f.planId) return;
+    for (const row of cloud.pending("tasks")) {
+      if (row.plan_id || row.deleted_at) continue;
+      cloud.enqueue("tasks", { ...row, plan_id: f.planId, bucket_id: f.bucketId, position: f.position });
+    }
+  }
+
+  /** Tells the phone which lists ring here first (it rings the others straight away). */
+  private shareLists(): void {
+    const l = this.lists();
+    if (!l) return;
+    const ids = [...l].sort();
+    const key = ids.join(",");
+    if (this.memory.sharedLists === key) return;
+    this.memory.listsItemId ??= crypto.randomUUID();
+    const now = new Date().toISOString();
+    cloud.enqueue("items", {
+      id: this.memory.listsItemId,
+      kind: "laptop_lists",
+      data: { plans: ids, device: this.deviceName },
+      occurred_on: null,
+      ref_id: null,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+    });
+    this.memory.sharedLists = key;
+    this.saveMemory();
+  }
+
   private publish(): void {
     const state: EngineState = {
-      tasks: this.tasks.map((t) => t.row),
+      tasks: this.tasks.filter((t) => this.shows(t)).map((t) => t.row),
       rings: this.rings,
       otps: this.otps,
       parcels: this.parcels,
@@ -270,6 +376,9 @@ export class Engine {
       signedIn: this.signedIn,
       email: null,
       queued: cloud.queued(),
+      failed: cloud.failedWrites(),
+      plans: this.plans.map(({ id, name }) => ({ id, name })),
+      lists: [...(this.lists() ?? [])],
     };
     void emit("buddy-state", state);
     if (this.rings.length === 0 && this.otps.length === 0) void hideCards();
@@ -286,8 +395,8 @@ export class Engine {
   }
 
   /**
-   * A button was pressed. A reminder answer closes its card right now (not after the queued sync, which
-   * could take a while and would redraw the old card meanwhile); the saving happens in the queue.
+   * A button was pressed or something was added. It is saved in the outbox right here (so a restart or a
+   * lost connection can't lose it), shown at once, and sent to the server straight after.
    */
   private receive(a: Action): void {
     if (a.type === "otpClose") {
@@ -295,76 +404,99 @@ export class Engine {
       this.publish();
       return;
     }
-    if (a.type === "done" || a.type === "snooze" || a.type === "tomorrow" || a.type === "dismiss") {
-      const r = this.findRing(a.ring) ?? a.ring;
-      this.closeRing(r);
-      const t = this.tasks.find((x) => x.id === r.taskId);
-      if (a.type === "snooze" && t) {
-        this.memory.snoozes[t.id] = `${r.base}:${Date.now() + a.minutes * 60_000}`;
-        this.saveMemory();
+    if (a.type !== "refresh") {
+      try {
+        this.save(a);
+      } catch (e) {
+        console.warn("engine: couldn't save", e);
       }
+      this.saveMemory();
       this.publish();
     }
-    void this.queue(() => this.act(a));
+    void this.queue(() => this.refresh());
   }
 
-  private async act(a: Action): Promise<void> {
-    if (!(await this.hasSession())) return;
+  /** Puts the writes for [a] in the outbox and applies them to what's on screen. */
+  private save(a: Exclude<Action, { type: "otpClose" } | { type: "refresh" }>): void {
     const device = `laptop:${this.deviceName}`;
     const task = (id: string) => this.tasks.find((t) => t.id === id);
+    const put = (row: Row) => {
+      cloud.enqueue("tasks", row);
+      this.tasks = this.tasks.filter((t) => t.id !== row.id);
+      if (!row.deleted_at) this.tasks.push(toTask(row));
+    };
     switch (a.type) {
-      case "refresh":
-        break;
       case "done":
       case "snooze":
       case "tomorrow":
       case "dismiss": {
         const r = this.findRing(a.ring) ?? a.ring;
-        const t = task(r.taskId);
         this.closeRing(r);
+        const t = task(r.taskId);
+        if (a.type === "snooze") {
+          const until = Date.now() + a.minutes * 60_000;
+          // Tell the phone first (keyed on the old time), so it stays quiet now.
+          cloud.ack(r.taskId, r.base, "snoozed", device, until);
+          if (t && t.repeat === null) {
+            // A one-off reminder moves to the new time everywhere: the lists show it, and laptop then
+            // phone ring then as usual.
+            put(snoozeRow(t, until));
+          } else if (t) {
+            // Repeating ones keep their schedule; the snooze is remembered on each device.
+            this.memory.snoozes[t.id] = `${r.base}:${until}`;
+          }
+          break;
+        }
         if (t) {
-          if (a.type === "done") for (const row of completeRows(t)) await cloud.write("tasks", row);
-          if (a.type === "tomorrow") await cloud.write("tasks", tomorrowRow(t));
+          if (a.type === "done") completeRows(t).forEach(put);
+          if (a.type === "tomorrow") put(tomorrowRow(t));
           if (a.type === "dismiss") {
             const row = skipRow(t);
-            if (row) await cloud.write("tasks", row);
-          }
-          if (a.type === "snooze") {
-            const until = Number(this.memory.snoozes[t.id]?.split(":")[1]) || Date.now() + a.minutes * 60_000;
-            // Tell the phone first (keyed on the old time), so it stays quiet now.
-            await cloud.ack(r.taskId, r.base, "snoozed", device, until);
-            // A one-off reminder moves to the new time everywhere: the list shows it, and laptop then phone
-            // ring then as usual. Repeating ones keep their schedule; the snooze stays on this laptop.
-            if (t.repeat === null) await cloud.write("tasks", snoozeRow(t, until));
+            if (row) put(row);
           }
         }
-        if (a.type !== "snooze") await cloud.ack(r.taskId, r.base, a.type === "done" ? "done" : a.type === "tomorrow" ? "moved" : "dismissed", device);
+        cloud.ack(r.taskId, r.base, a.type === "done" ? "done" : a.type === "tomorrow" ? "moved" : "dismissed", device);
         break;
       }
       case "complete": {
         const t = task(a.taskId);
-        if (t) for (const row of completeRows(t)) await cloud.write("tasks", row);
+        if (t) completeRows(t).forEach(put);
         this.rings = this.rings.filter((r) => r.taskId !== a.taskId);
         break;
       }
       case "reopen": {
         const t = task(a.taskId);
-        if (t) await cloud.write("tasks", reopenRow(t));
+        if (t) put(reopenRow(t));
         break;
       }
       case "delete": {
         const t = task(a.taskId);
-        if (t) await cloud.write("tasks", deleteRow(t));
+        if (t) put(deleteRow(t));
+        this.rings = this.rings.filter((r) => r.taskId !== a.taskId);
         break;
       }
-      case "addRow":
-        await cloud.write("tasks", a.row);
+      case "update": {
+        const t = task(a.taskId);
+        if (!t) break;
+        const row = editRow(t, a.patch);
+        put(row);
+        if ("remind_at" in a.patch && a.patch.remind_at !== t.row.remind_at) {
+          // A new reminder time: forget any snooze of the old one and close its card; it rings at the new time.
+          delete this.memory.snoozes[t.id];
+          this.rings = this.rings.filter((r) => r.taskId !== t.id);
+        }
         break;
+      }
+      case "addRow": {
+        // Filed here, from what the engine already knows: saving never waits on the network.
+        const f = this.filing();
+        put(a.row.plan_id ? a.row : { ...a.row, plan_id: f.planId, bucket_id: f.bucketId, position: f.position });
+        break;
+      }
       case "addNote":
-        await cloud.write("items", a.row);
+        cloud.enqueue("items", a.row);
         break;
     }
-    await this.refresh();
   }
 }
 

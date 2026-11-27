@@ -17,6 +17,8 @@ export interface Settings {
   pillX: number | null;
   pillY: number | null;
   startWithWindows: boolean;
+  /** Lists (plan ids) this laptop shows; null = Work. */
+  lists: string[] | null;
 }
 
 /** Shortcuts saved by earlier versions, by their old names. Ctrl + Shift + Space was the old default. */
@@ -56,6 +58,7 @@ function defaults(): Settings {
     pillX: null,
     pillY: null,
     startWithWindows: true,
+    lists: null,
   };
 }
 

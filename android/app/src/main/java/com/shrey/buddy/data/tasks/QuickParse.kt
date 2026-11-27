@@ -21,6 +21,8 @@ object QuickParse {
         val repeat: RepeatRule? = null,
         /** Ring at the due time — said "remind me", or gave a time. */
         val remind: Boolean = false,
+        /** A clock time was actually said ("2:30 pm", "half past 4"), not filled in. */
+        val timeSaid: Boolean = false,
     ) {
         val hasDetails get() = date != null || time != null || repeat != null || remind
         fun dueAt(): LocalDateTime? = date?.let { d -> time?.let { d.atTime(it) } }
@@ -60,6 +62,12 @@ object QuickParse {
         }
 
         take("(remind me to|remind me|reminder:?|remember to)") { remind = true }
+
+        // The clock time comes out first (with "in the afternoon" / "tonight" right next to it), so the
+        // date and number words below can't eat part of it. Its am / pm is settled once the day is known.
+        val clock = Clock.find(text)
+        if (clock != null) text = text.removeRange(clock.range).replace(Regex("\\s+"), " ").let { " ${it.trim()} " }
+        val timeSaid = clock != null
 
         // Repeats (some also fix the date).
         take("every (\\d{1,3}|other) (days|day|weeks|week|months|month|years|year)") { m ->
@@ -133,7 +141,8 @@ object QuickParse {
         // Dates.
         take("day after tomorrow") { date = today.plusDays(2) }
         take("(tomorrow|tmrw|tmr|tomo)") { date = today.plusDays(1) }
-        take("tonight") { date = today; partOfDay = LocalTime.of(21, 0) }
+        var tonight = false
+        take("tonight") { date = today; partOfDay = LocalTime.of(21, 0); tonight = true }
         take("today") { date = today }
         take("next week") { date = today.with(TemporalAdjusters.next(DayOfWeek.MONDAY)) }
         take("next $DAY") { m -> date = today.with(TemporalAdjusters.next(days.getValue(m.groupValues[1].lowercase()))) }
@@ -144,30 +153,28 @@ object QuickParse {
         if (!dayMonth) take("(?:on )?$MONTH (\\d{1,2})(?:st|nd|rd|th)?") { m ->
             date = futureDate(today, months.getValue(m.groupValues[1].lowercase()), m.groupValues[2].toInt())
         }
-        if (date == null) take("(?:on )?(?:the )?$ORD") { m -> date = nextDayOfMonth(today, m.groupValues[1].toInt()) }
-
-        // Times.
-        take("(?:at |by )?(\\d{1,2})(?::(\\d{2}))? ?(am|pm|a\\.m\\.|p\\.m\\.)") { m ->
-            var h = m.groupValues[1].toInt() % 12
-            if (m.groupValues[3].lowercase().startsWith("p")) h += 12
-            time = LocalTime.of(h.coerceIn(0, 23), m.groupValues[2].ifEmpty { "0" }.toInt().coerceIn(0, 59))
-        }
-        if (time == null) take("(?:at |by )?([01]?\\d|2[0-3]):([0-5]\\d)") { m ->
-            time = LocalTime.of(m.groupValues[1].toInt(), m.groupValues[2].toInt())
-        }
-        if (time == null) take("(?:at |by )(\\d{1,2})") { m ->
-            // "at 7": the next 7 o'clock — 7 am if it's still ahead today, otherwise 7 pm. 1–6 means pm.
-            val h = m.groupValues[1].toInt()
-            time = when {
-                h > 12 && h < 24 -> LocalTime.of(h, 0)
-                h in 1..6 -> LocalTime.of(h + 12, 0)
-                date == null || date == today -> if (LocalTime.of(h % 12, 0).isAfter(now.toLocalTime())) LocalTime.of(h % 12, 0) else LocalTime.of((h % 12) + 12, 0)
-                else -> LocalTime.of(h % 12, 0)
+        // "28/11", "28-11", "28/11/2026" (day first, as written in India).
+        if (date == null) take("(?:on )?(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{2,4}))?") { m ->
+            val d = m.groupValues[1].toInt()
+            val mo = m.groupValues[2].toInt()
+            if (mo in 1..12 && d in 1..31) {
+                val y = m.groupValues[3].toIntOrNull()?.let { if (it < 100) 2000 + it else it }
+                val month = Month.of(mo)
+                date = if (y != null) runCatching { LocalDate.of(y, month, d) }.getOrNull() else futureDate(today, month, d)
             }
         }
-        if (time == null) take("noon") { time = LocalTime.NOON }
-        if (time == null) take("midnight") { time = LocalTime.of(23, 59) }
-        take("(?:in the |this )?(morning|afternoon|evening|night)") { m -> partOfDay = partOfDayTime(m.groupValues[1].lowercase()) }
+        if (date == null) take("(?:on )?(?:the )?$ORD") { m -> date = nextDayOfMonth(today, m.groupValues[1].toInt()) }
+        take("(?:this )?weekend") { if (date == null) date = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SATURDAY)) }
+
+        // Part of the day said anywhere ("tomorrow evening", "this morning"), for am / pm.
+        var dayPart: String? = if (tonight) "night" else null
+        take("(?:in the |this |at |tomorrow )?(morning|afternoon|evening|night)") { m ->
+            dayPart = m.groupValues[1].lowercase()
+            partOfDay = partOfDayTime(dayPart!!)
+            if (m.value.lowercase().startsWith("tomorrow")) date = today.plusDays(1)
+        }
+        take("(eod|end of (?:the )?day)") { partOfDay = LocalTime.of(18, 0); if (date == null) date = today }
+        if (clock != null) time = Clock.resolve(clock, dayPart, date, today, now.toLocalTime())
         if (time == null) time = partOfDay
 
         // A time with no date means the next time it comes round.
@@ -193,7 +200,7 @@ object QuickParse {
             .let { if (remind) it.replace(Regex("(?i)^(to|that|about)\\s+"), "") else it }
             .replaceFirstChar { it.uppercase() }
         if (title.isEmpty()) return Result(input.trim())
-        return Result(title, date, time, repeat, remind = remind || time != null)
+        return Result(title, date, time, repeat, remind = remind || time != null, timeSaid = timeSaid)
     }
 
     private fun partOfDayTime(word: String): LocalTime? = when {

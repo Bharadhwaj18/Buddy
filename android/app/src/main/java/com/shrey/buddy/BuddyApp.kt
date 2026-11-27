@@ -56,6 +56,8 @@ class BuddyApp : Application() {
         // Warm the exercise library in the background so the picker opens instantly.
         ReminderScheduler.scope.launch { runCatching { com.shrey.buddy.health.ExerciseLibrary.all(this@BuddyApp) } }
         ReminderScheduler.scope.launch { runCatching { com.shrey.buddy.capture.WidgetGallery.publishPreviews(this@BuddyApp) } }
+        // Laptop changes arrive within seconds while Buddy is running, not at the next 15-minute sync.
+        com.shrey.buddy.data.sync.LiveSync.start(this)
         // Any task change (edit here, or a sync pull) re-arms the next reminder alarm.
         ReminderScheduler.scope.launch {
             container.db.taskDao().observeActive().debounce(300).collect {
@@ -78,6 +80,8 @@ class AppContainer(val context: Context) {
         install(Postgrest)
         install(Functions)
         install(Storage)
+        // Only for the tiny "something changed, sync now" signal between laptop and phone.
+        install(io.github.jan.supabase.realtime.Realtime)
     }
 
     val updater = Updater(context, supabase)

@@ -5,6 +5,7 @@ import { emit } from "@tauri-apps/api/event";
 import * as cloud from "./cloud";
 import { newRow } from "./tasks";
 import { parseRule } from "./repeat";
+import { parseWhen } from "./when";
 import { whenText } from "./format";
 import { parseQuick, wantsReminder, nextRoundHour, splitTime, type Draft } from "./quick";
 
@@ -95,7 +96,7 @@ export async function plan(input: string): Promise<Step[]> {
   for (const a of reply.actions) {
     switch (a.type) {
       case "create_task":
-        steps.push(taskStep(a, wantsReminder(text)));
+        steps.push(taskStep(a, wantsReminder(text), text));
         break;
       case "create_note":
         steps.push(noteStep(a));
@@ -126,9 +127,15 @@ function localMs(date: string | undefined, time: string | undefined): number | n
 }
 
 /** Turns the AI's create_task into a draft. "Remind me" always ends up as a reminder. */
-function taskStep(a: AiAction, remind: boolean): Step {
+function taskStep(a: AiAction, remind: boolean, text: string): Step {
   const title = (a.title ?? "").trim();
   if (!title) return { kind: "info", text: "Didn't catch the task" };
+  // A clock time said in words ("2.30 pm", "half past 4") is read here, not left to the AI, which
+  // sometimes rounds or drops it. The AI still decides the title and any repeat.
+  const said = parseWhen(text);
+  if (said.timeSaid && said.date && said.time) {
+    a = { ...a, due_date: said.date, due_time: said.time, remind_at: a.remind_at || remind ? `${said.date}T${said.time}` : undefined };
+  }
   const hasTime = !!a.due_time;
   const dueAt = localMs(a.due_date, a.due_time);
   const remindRaw = a.remind_at ? Date.parse(a.remind_at) : NaN;
@@ -163,11 +170,10 @@ function draftStep(first: Draft, repeatText: string | null = null): Step {
     draft: first,
     commit: async (edited?: Draft) => {
       const d = edited ?? first;
-      const { planId, bucketId } = await cloud.firstPlanAndBucket();
-      const position = (await cloud.highestPosition(bucketId)) + 1;
+      // The engine files it (Work, or the lists picked in settings) the moment it gets it.
       const row = newRow(
         { title: d.title, dueAt: d.dueAt, dueAllDay: !d.hasTime, remindAt: d.kind === "reminder" ? d.remindAt : null, repeat },
-        { planId, bucketId, position },
+        { planId: null, bucketId: null, position: 0 },
       );
       await emit("buddy-action", { type: "addRow", row });
       return d.kind === "reminder" && d.remindAt !== null

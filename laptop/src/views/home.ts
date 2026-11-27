@@ -13,7 +13,7 @@ import { escapeHtml, greeting, timeOf, whenText } from "../lib/format";
 type Tab = "today" | "upcoming" | "settings";
 
 export function mountHome(root: HTMLElement): void {
-  let state: EngineState = { tasks: [], rings: [], otps: [], parcels: [], online: true, signedIn: false, email: null, queued: 0 };
+  let state: EngineState = { tasks: [], rings: [], otps: [], parcels: [], online: true, signedIn: false, email: null, queued: 0, failed: 0, plans: [], lists: [] };
   let tab: Tab = "today";
   let email: string | null = null;
   let signInError = "";
@@ -49,6 +49,7 @@ export function mountHome(root: HTMLElement): void {
         </div>
         ${state.online ? "" : `<span class="chip warn">Offline</span>`}
         ${state.queued ? `<span class="chip">${state.queued} to sync</span>` : ""}
+        ${state.failed ? `<span class="chip warn" title="The server refused these changes">${state.failed} couldn't sync</span>` : ""}
         <button class="pill-btn primary" data-add>Add</button>
       </div>
       <div class="tabs">
@@ -129,6 +130,7 @@ export function mountHome(root: HTMLElement): void {
         ${row("Today pill", "The small pill at the top of the screen", toggle("showPill", s.showPill))}
         ${row("Look", null, `<select class="field" data-set="theme">${themes.map(([v, l]) => `<option value="${v}" ${s.theme === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}
         ${s.theme === "by_time" ? row("Dark from", null, timeSelect("darkFrom", s.darkFrom)) + row("Light from", null, timeSelect("lightFrom", s.lightFrom)) : ""}
+        ${listsRow()}
         ${row("Reminder sound", "A short notification sound when a reminder pops up", toggle("sound", s.sound))}
         ${row("Start with Windows", "Quietly in the tray when you sign in", toggle("startWithWindows", s.startWithWindows))}
         ${s.pillX !== null ? row("Pill position", "You moved it", `<button class="pill-btn small" data-reset-pill>Reset</button>`) : ""}
@@ -137,6 +139,15 @@ export function mountHome(root: HTMLElement): void {
         ${row("Signed in as", email ?? "", `<button class="pill-btn small" data-signout>Sign out</button>`)}
         ${row("Buddy", version ? `Version ${version}` : "", "")}
       </div>`;
+  }
+
+  function listsRow(): string {
+    if (state.plans.length === 0) return "";
+    const first = state.plans.find((p) => state.lists.includes(p.id));
+    const chips = state.plans
+      .map((p) => `<button class="chip-btn ${state.lists.includes(p.id) ? "on" : ""}" data-list="${escapeHtml(p.id)}">${escapeHtml(p.name)}</button>`)
+      .join("");
+    return `<div class="setting lists"><div class="label">Lists on this laptop<div class="sub">Shown in the pill and ring here first. New things go to ${escapeHtml(first?.name ?? "the first one")}.</div></div><div class="sheet-chips">${chips}</div></div>`;
   }
 
   function row(title: string, sub: string | null, control: string): string {
@@ -265,12 +276,21 @@ export function mountHome(root: HTMLElement): void {
       if (t) await emit("buddy-action", { type: t.isDone ? "reopen" : "complete", taskId: id });
       return;
     }
+    const listBtn = el.closest<HTMLElement>("[data-list]");
+    if (listBtn) {
+      const id = listBtn.dataset.list!;
+      const next = state.lists.includes(id) ? state.lists.filter((x) => x !== id) : [...state.lists, id];
+      if (next.length === 0) return; // keep at least one
+      updateSettings({ lists: next });
+      await emit("buddy-action", { type: "refresh" });
+      return;
+    }
     const toggleBtn = el.closest<HTMLElement>("[data-toggle]");
     if (toggleBtn) {
       const key = toggleBtn.dataset.toggle as keyof Settings;
       const cur = loadSettings();
       const next = updateSettings({ [key]: !cur[key] } as Partial<Settings>);
-      if (key === "startWithWindows") await (next.startWithWindows ? autostartOn() : autostartOff());
+      if (key === "startWithWindows") await (next.startWithWindows ? autostartOff().catch(() => undefined).then(() => autostartOn()) : autostartOff());
       draw();
     }
   });

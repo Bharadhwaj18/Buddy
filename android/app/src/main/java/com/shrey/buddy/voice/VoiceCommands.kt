@@ -58,9 +58,14 @@ object VoiceCommands {
                 "create_task" -> {
                     val title = a.title?.trim().orEmpty()
                     if (title.isEmpty()) return@map "Didn't catch the task"
-                    val due = a.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-                    val time = a.dueTime?.let { runCatching { LocalTime.parse(it) }.getOrNull() }?.takeIf { due != null }
-                    val remind = a.remindAt?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
+                    // A clock time said in words ("2.30 pm", "half past 4") is read here, not left to the
+                    // AI, which sometimes rounds or drops it. The AI still decides the title and repeat.
+                    val said = com.shrey.buddy.data.tasks.QuickParse.parse(transcript).takeIf { it.timeSaid && it.date != null && it.time != null }
+                    val aiDue = a.dueDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                    val aiRemind = a.remindAt?.let { runCatching { LocalDateTime.parse(it) }.getOrNull() }
+                    val due = said?.date ?: aiDue
+                    val time = said?.time ?: a.dueTime?.let { runCatching { LocalTime.parse(it) }.getOrNull() }?.takeIf { due != null }
+                    val remind = if (said != null && (aiRemind != null || said.remind)) said.dueAt() else aiRemind
                     val repeat = RepeatRule.parse(a.repeat)
                     c.tasks.add(
                         title,

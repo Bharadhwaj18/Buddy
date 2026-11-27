@@ -42,7 +42,7 @@ class SyncEngine(
             supabase.auth.sessionStatus.first { it !is SessionStatus.Initializing }
             if (supabase.auth.currentSessionOrNull() == null) return@runCatching
             val failures = mutableMapOf<String, Throwable>()
-            push(failures)
+            if (push(failures) > 0) LiveSync.poke()
             for (table in tables) {
                 if (table.name in failures) continue
                 runCatching { pull(table) }.onFailure { failures[table.name] = it }
@@ -56,11 +56,13 @@ class SyncEngine(
         }.onFailure { e -> Log.w(TAG, "sync failed", e) }
     }
 
-    private suspend fun push(failures: MutableMap<String, Throwable>) {
+    /** Sends queued local changes; returns how many were sent. */
+    private suspend fun push(failures: MutableMap<String, Throwable>): Int {
         val outbox = db.outboxDao()
+        var total = 0
         while (true) {
             val batch = outbox.peekExcluding(failures.keys.toList(), PAGE)
-            if (batch.isEmpty()) return
+            if (batch.isEmpty()) return total
             val grouped = batch.groupBy { it.tableName }
             val sent = mutableListOf<Long>()
             for (table in tables) {
@@ -75,6 +77,7 @@ class SyncEngine(
             }
             // Only remove what we sent; edits made during the push keep their own (newer) entries.
             outbox.remove(sent)
+            total += sent.size
         }
     }
 

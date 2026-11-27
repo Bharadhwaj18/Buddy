@@ -149,15 +149,15 @@ describe("quick words and default times", () => {
     expect(nextRoundHour(at(2026, 11, 24, 23, 30))).toBe(at(2026, 11, 25, 0, 0));
   });
   it("rm and ! make reminders; no time means the next round hour", () => {
-    expect(parseQuick("rm call Ravi", now)).toMatchObject({ kind: "reminder", title: "call Ravi", remindAt: at(2026, 11, 24, 16, 0) });
-    expect(parseQuick("!call Ravi at 5:30 pm", now)).toMatchObject({ kind: "reminder", title: "call Ravi", remindAt: at(2026, 11, 24, 17, 30) });
+    expect(parseQuick("rm call Ravi", now)).toMatchObject({ kind: "reminder", title: "Call Ravi", remindAt: at(2026, 11, 24, 16, 0) });
+    expect(parseQuick("!call Ravi at 5:30 pm", now)).toMatchObject({ kind: "reminder", title: "Call Ravi", remindAt: at(2026, 11, 24, 17, 30) });
     expect(parseQuick("rm stretch in 20 min", now)?.remindAt).toBe(now + 20 * 60_000);
     expect(parseQuick("rm standup tomorrow 9am", now)?.remindAt).toBe(at(2026, 11, 25, 9, 0));
     expect(parseQuick("rm pay rent tomorrow", now)?.remindAt).toBe(at(2026, 11, 25, 9, 0));
     expect(parseQuick("rm gym 9am", now)?.remindAt).toBe(at(2026, 11, 25, 9, 0));
   });
   it("t: makes a task; plain text is left to the AI", () => {
-    expect(parseQuick("t: send the deck", now)).toMatchObject({ kind: "task", title: "send the deck", remindAt: null, dueAt: null });
+    expect(parseQuick("t: send the deck", now)).toMatchObject({ kind: "task", title: "Send the deck", remindAt: null, dueAt: null });
     expect(parseQuick("remind me to call Ravi", now)).toBeNull();
     expect(parseQuick("trim the hedge", now)).toBeNull();
   });
@@ -166,7 +166,7 @@ describe("quick words and default times", () => {
     expect(wantsReminder("call Ravi")).toBe(false);
   });
   it("leaves numbers that aren't times alone", () => {
-    expect(splitTime("buy 3", now)).toMatchObject({ title: "buy 3", at: null });
+    expect(splitTime("buy 3", now)).toMatchObject({ title: "Buy 3", at: null });
   });
   it("chips change the draft", () => {
     const d = parseQuick("rm call Ravi", now)!;

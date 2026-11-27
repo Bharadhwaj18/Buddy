@@ -144,7 +144,7 @@ fun SplitsScreen(lvm: LifeViewModel, onBack: () -> Unit) {
                 trailingIcon = { IconButton(onClick = { addQuick() }, enabled = quick.isNotBlank()) { Icon(Icons.AutoMirrored.Rounded.Send, "Add") } },
             )
         }
-        if (open.isEmpty()) item { EmptyNote("Nobody owes anybody. Type a split above, tap ＋, or say \"Hey Buddy, split 900 with Ravi\".") }
+        if (open.isEmpty()) item { EmptyNote("Nobody owes anybody. Type a split above, tap ＋, or say \"Buddy listen, split 900 with Ravi\".") }
         val byPerson = open.groupBy { it.data.person to it.data.theyOwe }.entries.sortedByDescending { e -> e.value.sumOf { it.data.amountMinor } }
         items(byPerson.map { it.key to it.value }, key = { "${it.first.first}:${it.first.second}" }) { (k, list) ->
             val (person, theyOwe) = k

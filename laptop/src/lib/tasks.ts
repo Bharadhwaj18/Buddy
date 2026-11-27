@@ -126,6 +126,23 @@ export function snoozeRow(t: Task, until: number, now = Date.now()): Row {
   return { ...forPush(t.row), remind_at: iso(until), updated_at: iso(stamp(t, now)) };
 }
 
+/** Fields the details view can change. */
+export type TaskPatch = Partial<{
+  title: string;
+  notes: string | null;
+  remind_at: string | null;
+  due_at: string | null;
+  due_all_day: boolean;
+  repeat: string | null;
+  priority: string;
+  my_day: string | null;
+}>;
+
+/** An edit from the details view: the whole row with the changed fields. */
+export function editRow(t: Task, patch: TaskPatch, now = Date.now()): Row {
+  return { ...forPush(t.row), ...patch, updated_at: iso(stamp(t, now)) };
+}
+
 /** Ticks a done task back to to-do (undo). */
 export function reopenRow(t: Task, now = Date.now()): Row {
   return { ...forPush(t.row), status: "todo", completed_at: null, updated_at: iso(stamp(t, now)) };

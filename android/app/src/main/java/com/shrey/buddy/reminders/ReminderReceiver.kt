@@ -64,10 +64,22 @@ object ReminderActions {
             if (taskId.isNotEmpty()) {
                 val tasks = (app as BuddyApp).container.tasks
                 val task = tasks.get(taskId)
-                if (task != null && task.deletedAt == null) {
+                if (task != null && task.deletedAt == null && action == ReminderReceiver.ACTION_SNOOZE) {
+                    val until = SmartSnooze.until(minutes)
+                    // Tell the laptop first (keyed on the old time), so its pop-up closes and it stays quiet.
+                    LaptopFirst.ack(app, task, "snoozed", until)
+                    if (task.repeat == null) {
+                        // A one-off reminder moves to the new time everywhere (same as snoozing on the
+                        // laptop): both lists show it, and it rings then on the laptop, then the phone.
+                        ReminderScheduler.clearSnooze(app, task)
+                        tasks.save(task.copy(remindAt = until))
+                    } else {
+                        // Repeating ones keep their schedule; each device remembers the snooze.
+                        ReminderScheduler.snoozeUntil(app, task, until)
+                    }
+                } else if (task != null && task.deletedAt == null) {
                     when (action) {
                         ReminderReceiver.ACTION_DONE -> tasks.save(task.copy(status = "done"))
-                        ReminderReceiver.ACTION_SNOOZE -> ReminderScheduler.snooze(app, task, minutes)
                         ReminderReceiver.ACTION_DISMISS -> {
                             ReminderScheduler.clearSnooze(app, task)
                             if (task.repeat != null) tasks.skip(task)
@@ -75,12 +87,7 @@ object ReminderActions {
                         ReminderReceiver.ACTION_STOP_CALLING -> ReminderScheduler.clearSnooze(app, task)
                     }
                     // Close the laptop's pop-up for this reminder too.
-                    val ack = when (action) {
-                        ReminderReceiver.ACTION_DONE -> "done"
-                        ReminderReceiver.ACTION_SNOOZE -> "snoozed"
-                        else -> "dismissed"
-                    }
-                    LaptopFirst.ack(app, task, ack, ReminderScheduler.snoozedUntil(app, task).takeIf { ack == "snoozed" })
+                    LaptopFirst.ack(app, task, if (action == ReminderReceiver.ACTION_DONE) "done" else "dismissed")
                 }
             }
             ReminderScheduler.refresh(app)

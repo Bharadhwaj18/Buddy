@@ -297,10 +297,10 @@ object VoiceIntent {
         "^(what|what's|whats|how|when|where|why|who|which|did|do (?:i|you|we)|does|is|are|am i|was|were|have i|has|should i|tell me|show me|give me|any)\\b",
     )
 
-    /** Lower-case (unless [keepCase]), drop "hey buddy"/"please"/"can you", spoken numbers → digits. */
+    /** Lower-case (unless [keepCase]), drop "buddy listen"/"hey buddy"/"please"/"can you", spoken numbers → digits. */
     internal fun normalise(input: String, keepCase: Boolean = false): String {
         var t = (if (keepCase) input else input.lowercase()).replace('’', '\'').replace(Regex("[\"“”]"), " ").replace(Regex("\\s+"), " ").trim()
-        t = t.replace(Regex("^(?:(?:hey|hi|ok|okay) )?buddy[,.!]?\\s*", RegexOption.IGNORE_CASE), "")
+        t = t.replace(Regex("^(?:(?:hey|hi|ok|okay) )?buddy[,.!]?(?: listen[,.!]?)?\\s*", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("^(?:(?:can|could|would|will) you (?:please )?|please |pls |kindly |just )+", RegexOption.IGNORE_CASE), "")
         t = wordsToDigits(t)
         return t.trim().trimEnd('.', '!')

@@ -51,9 +51,13 @@ async function startEngine(): Promise<void> {
   // The hotkey, start-with-Windows and the device name are set up once, here.
   await invoke("set_hotkey", { name: s.hotkey }).catch((e) => console.warn("hotkey", e));
   try {
+    // Rewritten on every start, not just checked: an entry left by an older install can point at a
+    // file that's gone, and Windows then quietly skips Buddy at sign-in.
     const on = await autostartIsOn();
-    if (s.startWithWindows && !on) await autostartOn();
-    if (!s.startWithWindows && on) await autostartOff();
+    if (s.startWithWindows) {
+      if (on) await autostartOff().catch(() => undefined);
+      await autostartOn();
+    } else if (on) await autostartOff();
   } catch (e) {
     console.warn("autostart", e);
   }

@@ -347,7 +347,7 @@ private fun RoutineEditor(
                             style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary,
                         )
                     }
-                    "manual" -> Text("Say \"Hey Buddy, ${r.name.ifBlank { "movie mode" }.lowercase()}\" or tap ▶.", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
+                    "manual" -> Text("Say \"Buddy listen, ${r.name.ifBlank { "movie mode" }.lowercase()}\" or tap ▶.", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
                     "wake" -> Text("Runs when a reminder with wake / alarm / get up / morning in its title calls. Tip: the Wake up scene brightens slowly.", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
                     "reminder" -> Text("Runs whenever a reminder calls. Tip: Flash, so you notice it.", style = MaterialTheme.typography.labelSmall, color = BuddyColors.TextTertiary)
                 }

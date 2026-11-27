@@ -1,5 +1,6 @@
 package com.shrey.buddy.voice
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -79,9 +80,10 @@ class ListeningActivity : ComponentActivity() {
                 val pulse by rememberInfiniteTransition(label = "orb").animateFloat(
                     1f, 1.18f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "pulse",
                 )
+                androidx.activity.compose.BackHandler { close(live) }
                 Box(
                     Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f))
-                        .clickable(remember { MutableInteractionSource() }, indication = null) { finish() },
+                        .clickable(remember { MutableInteractionSource() }, indication = null) { close(live) },
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(28.dp), modifier = Modifier.padding(32.dp)) {
@@ -103,9 +105,20 @@ class ListeningActivity : ComponentActivity() {
                         }
                         Text(title, style = MaterialTheme.typography.headlineMedium, color = BuddyColors.TextPrimary)
                         Text(body, style = MaterialTheme.typography.titleMedium, color = color, textAlign = TextAlign.Center)
+                        if (live is Live.Listening || live is Live.Thinking) {
+                            androidx.compose.material3.OutlinedButton(onClick = { close(live) }) { Text("Cancel") }
+                        }
                     }
                 }
             }
         }
+    }
+
+    /** Closing while Buddy is still listening or working on it cancels the command; afterwards it just closes. */
+    private fun close(live: Live) {
+        if (live is Live.Listening || live is Live.Thinking) {
+            runCatching { startService(Intent(this, BuddyVoiceService::class.java).setAction(BuddyVoiceService.ACTION_CANCEL)) }
+        }
+        finish()
     }
 }

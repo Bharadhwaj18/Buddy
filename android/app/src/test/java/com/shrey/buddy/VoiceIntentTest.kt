@@ -41,6 +41,13 @@ class VoiceIntentTest {
         assertEquals(Category.FOOD, r.category)
     }
 
+    @Test fun `the wake phrase buddy listen is not part of the command`() {
+        val r = p("Buddy listen, I spent 450 on lunch")
+        assertEquals(Kind.EXPENSE, r.kind)
+        assertEquals(45_000L, r.amountMinor)
+        assertEquals("Lunch", r.payee)
+    }
+
     @Test fun `one fifty means 150`() = assertEquals(15_000L, p("paid one fifty for auto").amountMinor)
 
     @Test fun `k and payee and account`() {
