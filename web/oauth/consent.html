@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Buddy · Allow access</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0E0F12; --card: #17191E; --line: #262932; --text: #F2F3F5; --dim: #9AA0AC; --lime: #C6F432; --red: #FF6B6B; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+    background: var(--bg); color: var(--text); font: 16px/1.5 "Plus Jakarta Sans", system-ui, sans-serif; }
+  main { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 28px 24px; }
+  .logo { width: 44px; height: 44px; border-radius: 14px; background: var(--lime); display: grid; place-items: center; margin-bottom: 18px; }
+  .logo span { display: flex; gap: 3px; align-items: center; }
+  .logo i { display: block; width: 4px; border-radius: 2px; background: var(--bg); }
+  h1 { font-size: 22px; font-weight: 800; margin: 0 0 6px; }
+  p { color: var(--dim); margin: 0 0 18px; }
+  ul { margin: 0 0 22px; padding-left: 20px; color: var(--dim); }
+  li { margin: 4px 0; }
+  b { color: var(--text); font-weight: 600; }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 0 0 6px; }
+  input { width: 100%; padding: 12px 14px; margin: 0 0 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit; }
+  input:focus { outline: 2px solid var(--lime); border-color: transparent; }
+  .row { display: flex; gap: 10px; }
+  button { flex: 1; padding: 13px 16px; border-radius: 999px; border: 0; font: 600 15px "Plus Jakarta Sans", system-ui, sans-serif; cursor: pointer; }
+  .go { background: var(--lime); color: var(--bg); }
+  .no { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .err { color: var(--red); min-height: 1.5em; margin: 12px 0 0; font-size: 14px; }
+  .who { font-size: 13px; color: var(--dim); margin: 18px 0 0; }
+  .who a { color: var(--dim); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo" aria-hidden="true"><span><i style="height:10px"></i><i style="height:18px"></i><i style="height:13px"></i></span></div>
+
+  <section id="loading"><h1>Buddy</h1><p>One moment…</p></section>
+
+  <form id="signin" hidden>
+    <h1>Sign in to Buddy</h1>
+    <p>An AI assistant wants to read your Buddy data. Sign in first.</p>
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <div class="row"><button class="go" type="submit">Sign in</button></div>
+  </form>
+
+  <section id="consent" hidden>
+    <h1>Allow <span id="client">this app</span>?</h1>
+    <p>It wants to <b>read</b> your Buddy data, so it can give you overviews and answer questions.</p>
+    <ul>
+      <li>Money: transactions, accounts, budgets, investments</li>
+      <li>Tasks, lists and reminders</li>
+      <li>Health: steps, sleep, workouts, weight</li>
+      <li>Life: notes, journal, habits, people, vehicles…</li>
+    </ul>
+    <p><b>Read only.</b> It can't add, change or delete anything, and never sees one-time codes or stored files.</p>
+    <div class="row">
+      <button class="no" id="deny" type="button">Deny</button>
+      <button class="go" id="allow" type="button">Allow</button>
+    </div>
+    <p class="who">Signed in as <span id="email-shown"></span> · <a href="#" id="switch">not you?</a></p>
+  </section>
+
+  <section id="done" hidden><h1>All set</h1><p>Taking you back…</p></section>
+
+  <p class="err" id="err" role="alert"></p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
+<script>
+  // Filled in when the site is published (GitHub Actions variables), so the repo itself has no project details.
+  const SUPABASE_URL = "__SUPABASE_URL__";
+  const SUPABASE_KEY = "__SUPABASE_PUBLISHABLE_KEY__";
+
+  const $ = (id) => document.getElementById(id);
+  const show = (id) => ["loading", "signin", "consent", "done"].forEach((s) => ($(s).hidden = s !== id));
+  const fail = (m) => { $("err").textContent = m; };
+  const authorizationId = new URLSearchParams(location.search).get("authorization_id");
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { storageKey: "buddy-consent", persistSession: true } });
+
+  async function start() {
+    fail("");
+    if (!authorizationId) { show("loading"); $("loading").querySelector("p").textContent = "Nothing to approve here. Start from your AI app."; return; }
+    const { data: { session } } = await db.auth.getSession();
+    if (!session) { show("signin"); $("email").focus(); return; }
+    const { data, error } = await db.auth.oauth.getAuthorizationDetails(authorizationId);
+    if (error) { show("consent"); fail(error.message); $("allow").disabled = true; return; }
+    if (data && !("authorization_id" in data) && data.redirect_url) { go(data.redirect_url); return; } // approved before
+    $("client").textContent = data?.client?.name || data?.client?.client_name || "this app";
+    $("email-shown").textContent = session.user.email ?? "you";
+    show("consent");
+  }
+
+  function go(url) { show("done"); location.replace(url); }
+
+  async function decide(approve) {
+    $("allow").disabled = $("deny").disabled = true;
+    const { data, error } = approve
+      ? await db.auth.oauth.approveAuthorization(authorizationId)
+      : await db.auth.oauth.denyAuthorization(authorizationId);
+    if (error) { fail(error.message); $("allow").disabled = $("deny").disabled = false; return; }
+    go(data.redirect_url ?? data.redirect_to);
+  }
+
+  $("signin").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    fail("");
+    const btn = e.target.querySelector("button");
+    btn.disabled = true;
+    const { error } = await db.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
+    btn.disabled = false;
+    if (error) { fail(error.message); return; }
+    $("password").value = "";
+    start();
+  });
+  $("allow").addEventListener("click", () => decide(true));
+  $("deny").addEventListener("click", () => decide(false));
+  $("switch").addEventListener("click", async (e) => { e.preventDefault(); await db.auth.signOut(); start(); });
+
+  start().catch((e) => { show("consent"); fail(String(e?.message ?? e)); });
+</script>
+</body>
+</html>

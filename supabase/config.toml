@@ -4,3 +4,8 @@ project_id = "shrey-app"
 [functions.buddy-ai]
 # Require a signed-in user's JWT; the function also re-checks it and queries under RLS.
 verify_jwt = true
+
+[functions.buddy-mcp]
+# The MCP server checks the OAuth token itself; the gateway must let the unauthenticated discovery
+# request through so assistants can find the sign-in server.
+verify_jwt = false
